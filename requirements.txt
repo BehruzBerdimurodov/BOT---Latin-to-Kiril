@@ -2,10 +2,11 @@ python-telegram-bot==21.1.1
 pydub==0.25.1
 google-generativeai==0.7.0
 
-# Agar ovoz konvertatsiya bo'lsa:
+# Audio metadata uchun:
+mutagen==1.47.0
+
+# Ovoz konvertatsiya bo'lsa:
 ffmpeg-python==0.2.0
 
-# .env ishlatsa:
+# .env uchun:
 python-dotenv==1.0.1
-
-# Logging uchun standart modul bo'lgani uchun kerak emas
