@@ -2,7 +2,7 @@ import os
 import logging
 import re
 import tempfile
-from telegram import ReplyKeyboardMarkup, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import ReplyKeyboardMarkup, Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
@@ -26,60 +26,42 @@ genai.configure(api_key=GENAI_API_KEY)
 model = genai.GenerativeModel('gemini-2.0-flash')
 
 # --- Logging ---
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 # ===================== TRANSLITERATION MODULE =====================
 
-# --- 1. Diakritiklarni normallashtirish (Lotin uchun) ---
+# --- Diakritiklarni normallashtirish ---
 latin_normalize = {
-    # A
     'á':'a','à':'a','ä':'a','â':'a','ã':'a','ā':'a','ă':'a','å':'a',
     'Á':'A','À':'A','Ä':'A','Â':'A','Ã':'A','Ā':'A','Ă':'A','Å':'A',
-
-    # O — hammasi O'
     'ó':"o'",'ò':"o'",'ö':"o'",'õ':"o'",'ō':"o'",'ô':"o'",'ø':"o'",
-    'ȫ':"o'",'ȯ':"o'",'ȱ':"o'",'ǒ':"o'",
-
     'Ó':"O'",'Ò':"O'",'Ö':"O'",'Õ':"O'",'Ō':"O'",'Ô':"O'",'Ø':"O'",
-    'Ȫ':"O'",'Ȯ':"O'",'Ȱ':"O'",'Ǒ':"O'",
-
-    # E
     'é':'e','è':'e','ë':'e','ê':'e','ē':'e','ĕ':'e','ė':'e',
     'É':'E','È':'E','Ë':'E','Ê':'E','Ē':'E','Ĕ':'E','Ė':'E',
-
-    # I
     'í':'i','ì':'i','ï':'i','î':'i','ī':'i',
     'Í':'I','Ì':'I','Ï':'I','Î':'I','Ī':'I',
-
-    # U
     'ú':'u','ù':'u','ü':'u','û':'u','ũ':'u','ū':'u','ů':'u',
     'Ú':'U','Ù':'U','Ü':'U','Û':'U','Ũ':'U','Ū':'U','Ů':'U',
-
-    # G'
-    'ğ':"g'",'ǧ':"g'",'ģ':"g'",
-    'Ğ':"G'",'Ǧ':"G'",'Ģ':"G'",
-
-    # N'
-    'ñ':"n'",'ņ':"n'",'ň':"n'", 
-    'Ñ':"N'",'Ņ':"N'",'Ň':"N'",
+    'ğ':"g'",'Ğ':"G'",'ñ':"n'",'Ñ':"N'",
 }
-
 
 def normalize_latin(text):
     return ''.join(latin_normalize.get(ch, ch) for ch in text)
 
 def normalize_apostrophe(text):
-    for a in ["'","ʻ","`","´","ˈ","ʿ","῾","‛","ʼ","'","ʹ","ˊ"]:
+    for a in ["'","ʻ","`","´","ˈ","ʿ","'","ʼ"]:
         text = text.replace(a, "'")
     return text
 
-
 # ===================== LOTIN → KIRIL =====================
 def to_cyrillic(text):
+    """Lotindan kirilga transliteratsiya"""
     text = normalize_latin(normalize_apostrophe(text))
-
-    # Murakkablar
+    
     pairs = [
         ("o'", "ў"), ("O'", "Ў"),
         ("g'", "ғ"), ("G'", "Ғ"),
@@ -89,17 +71,16 @@ def to_cyrillic(text):
         ("yo", "ё"), ("Yo", "Ё"), ("YO", "Ё"),
         ("yu", "ю"), ("Yu", "Ю"), ("YU", "Ю"),
         ("ya", "я"), ("Ya", "Я"), ("YA", "Я"),
-
-        # YE maxsus
         ("ye", "е"), ("Ye", "Е"), ("YE", "Е"),
     ]
+    
     for lat, cyr in pairs:
         text = text.replace(lat, cyr)
-
+    
     # So'z boshida E → Э
     text = re.sub(r"\bE", "Э", text)
     text = re.sub(r"\be", "э", text)
-
+    
     mapping = {
         'a':'а','b':'б','d':'д','e':'е','f':'ф','g':'г','h':'ҳ','i':'и','j':'ж',
         'k':'к','l':'л','m':'м','n':'н','o':'о','p':'п','q':'қ','r':'р',
@@ -109,290 +90,414 @@ def to_cyrillic(text):
         'S':'С','T':'Т','U':'У','V':'В','X':'Х','Y':'Й','Z':'З',
         "'":"ъ"
     }
-
+    
     return ''.join(mapping.get(ch, ch) for ch in text)
-
 
 # ===================== KIRIL → LOTIN (TUZATILGAN) =====================
 def to_latin(text):
-    """Kirildan lotinga o'girish - xatolar tuzatildi"""
+    """Kirildan lotinga transliteratsiya - barcha xatolar tuzatildi"""
     
     def fix_E(text):
-        """E harfi uchun maxsus qoidalar"""
-        # Э → E
         text = text.replace("Э", "E").replace("э", "e")
-        
-        # So'z boshida Е → Ye
         text = re.sub(r"\bЕ", "Ye", text)
         text = re.sub(r"\bе", "ye", text)
-        
-        # Unli harflardan keyin Е → ye
         vowels = "АаЕеЁёИиОоУуЭэЮюЯяЎўҚқҒғҲҳ"
         text = re.sub(rf"([{vowels}])Е", r"\1ye", text)
         text = re.sub(rf"([{vowels}])е", r"\1ye", text)
-        
-        # Qolgan Е → e
         text = text.replace("Е", "e").replace("е", "e")
         return text
     
-    # Avval E harfini qayta ishlash
     text = fix_E(text)
     
-    # Murakkab kombinatsiyalar (uzundan qisqaga qarab)
+    # Murakkab kombinatsiyalar
     mapping = [
-        # 3 harfli kombinatsiyalar
-        ('қӯў',"qo'"),('Қӯў',"Qo'"),
-        ('нгҳ','ngh'),('Нгҳ','Ngh'),
-        
-        # 2 harfli kombinatsiyalar
         ('қў',"qo'"),('Қў',"Qo'"),
-        ('қӯ',"qo'"),('Қӯ',"Qo'"),
-        
-        # Ўнлилар ва товушлар
         ('ё','yo'),('Ё','Yo'),
         ('ю','yu'),('Ю','Yu'),
         ('я','ya'),('Я','Ya'),
         ('ш','sh'),('Ш','Sh'),
         ('ч','ch'),('Ч','Ch'),
         ('нг','ng'),('Нг','Ng'),('НГ','NG'),
-        
-        # O' va G'
         ('ў',"o'"),('Ў',"O'"),
         ('ғ',"g'"),('Ғ',"G'"),
-        
-        # Maxsus harflar
         ('қ','q'), ('Қ','Q'),
         ('ҳ','h'), ('Ҳ','H'),
-        
-        # Rus harflari (agar matnda bo'lsa)
-        ('ж','j'), ('Ж','J'),  # ж → j (o'zbek tilida)
-        ('х','x'), ('Х','X'),  # х → x
+        ('ж','j'), ('Ж','J'),
     ]
     
     for cyr, lat in mapping:
         text = text.replace(cyr, lat)
     
-    # Bitta harfli konversiya
     chars = {
         'а':'a','б':'b','в':'v','г':'g','д':'d',
-        'ё':'yo','з':'z','и':'i','й':'y','к':'k',
-        'л':'l','м':'m','н':'n','о':'o','п':'p',
-        'р':'r','с':'s','т':'t','у':'u','ф':'f',
+        'з':'z','и':'i','й':'y','к':'k','л':'l',
+        'м':'m','н':'n','о':'o','п':'p','р':'r',
+        'с':'s','т':'t','у':'u','ф':'f','х':'x',
         'ц':'ts','щ':'shch','ъ':"'",'ь':'','ы':'i',
-        'э':'e','ю':'yu','я':'ya',
+        'э':'e',
         
         'А':'A','Б':'B','В':'V','Г':'G','Д':'D',
-        'Ё':'Yo','З':'Z','И':'I','Й':'Y','К':'K',
-        'Л':'L','М':'M','Н':'N','О':'O','П':'P',
-        'Р':'R','С':'S','Т':'T','У':'U','Ф':'F',
+        'З':'Z','И':'I','Й':'Y','К':'K','Л':'L',
+        'М':'M','Н':'N','О':'O','П':'P','Р':'R',
+        'С':'S','Т':'T','У':'U','Ф':'F','Х':'X',
         'Ц':'Ts','Щ':'Shch','Ъ':"'",'Ь':'','Ы':'I',
-        'Э':'E','Ю':'Yu','Я':'Ya'
+        'Э':'E'
     }
     
     return ''.join(chars.get(ch, ch) for ch in text)
 
-
-# ===================== END TRANSLITERATION =====================
-
+# ===================== AI FUNCTION =====================
 def call_gemini(prompt: str) -> str:
-    """Gemini AI chaqirish funksiyasi"""
+    """Gemini AI bilan ishlash"""
     try:
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        logger.exception("Gemini call failed")
-        return f"(Gemini xatosi: {e})"
+        logger.exception("Gemini xatosi")
+        return f"❌ Kechirasiz, xatolik yuz berdi: {str(e)}"
 
-# Asosiy klaviatura
-KEYBOARD = [
+# ===================== KEYBOARDS =====================
+MAIN_KEYBOARD = [
     ["📝 Lotin → Kiril", "📝 Kiril → Lotin"],
     ["💬 ChatBot", "🎵 Musiqa tahrirlash"],
-    ["📊 Statistika", "📩 Adminga xabar"],
-    ["✂️ Ovoz kesuvchi", "🎶 Ovozni Musiqaga aylantirish"]
+    ["✂️ Ovoz kesuvchi", "🎶 MP3 ga aylantirish"],
+    ["📊 Statistika", "📩 Adminga xabar"]
 ]
-REPLY_MARKUP = ReplyKeyboardMarkup(KEYBOARD, resize_keyboard=True)
+MAIN_MARKUP = ReplyKeyboardMarkup(MAIN_KEYBOARD, resize_keyboard=True)
 
+CANCEL_KEYBOARD = [["❌ Bekor qilish"]]
+CANCEL_MARKUP = ReplyKeyboardMarkup(CANCEL_KEYBOARD, resize_keyboard=True)
+
+# ===================== START & HELP =====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start buyrug'i - bot ishga tushganda"""
+    """Bot ishga tushganda"""
+    user = update.effective_user
     context.bot_data.setdefault('users', set())
-    user_id = update.message.from_user.id
-    context.bot_data['users'].add(user_id)
+    context.bot_data['users'].add(user.id)
     
-    welcome_message = (
-        "🎉 <b>Assalomu alaykum!</b>\n\n"
-        "🤖 Men ko'p funksiyali Telegram botman!\n\n"
-        "📝 <b>Nima qila olaman:</b>\n"
-        "• Lotin ⇄ Kiril o'girish\n"
-        "• ChatBot - savol-javob\n"
-        "• Musiqa tahrirlash (title, author)\n"
-        "• Ovoz kesish va qayta ishlash\n"
-        "• Statistika va admin bilan aloqa\n\n"
-        "👇 Quyidagi tugmalardan birini tanlang:"
+    # Mode reset
+    context.user_data.clear()
+    
+    welcome = (
+        f"👋 <b>Assalomu alaykum, {user.first_name}!</b>\n\n"
+        "🤖 Men ko'p funksiyali yordamchi botman!\n\n"
+        "🎯 <b>Imkoniyatlar:</b>\n"
+        "📝 Lotin ⇄ Kiril transliteratsiya\n"
+        "💬 AI ChatBot (Gemini)\n"
+        "🎵 Musiqa metadata tahrirlash\n"
+        "✂️ Audio kesish va qayta ishlash\n"
+        "📊 Statistika va admin aloqasi\n\n"
+        "💡 <b>Maslahat:</b> Tugmalarni bosing yoki /help buyrug'ini kiriting!"
     )
     
     await update.message.reply_text(
-        welcome_message,
-        reply_markup=REPLY_MARKUP,
+        welcome,
+        reply_markup=MAIN_MARKUP,
         parse_mode='HTML'
     )
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Yordam buyrug'i"""
+    """Yordam va buyruqlar"""
     help_text = (
-        "📚 <b>Bot funksiyalari:</b>\n\n"
-        "📝 <b>Lotin ⇄ Kiril</b>\n"
-        "Matnlarni transliteratsiya qilish\n\n"
-        "💬 <b>ChatBot</b>\n"
-        "AI bilan suhbatlashing\n\n"
-        "🎵 <b>Musiqa tahrirlash</b>\n"
-        "MP3 faylning title va authorini o'zgartiring\n\n"
-        "✂️ <b>Ovoz kesuvchi</b>\n"
-        "Audioni vaqt bo'yicha kesing\n\n"
-        "🎶 <b>Musiqaga aylantirish</b>\n"
-        "Ovozni MP3 formatga o'tkazing\n\n"
-        "📊 <b>Statistika</b>\n"
-        "Bot foydalanuvchilari soni\n\n"
-        "📩 <b>Adminga xabar</b>\n"
-        "Admin bilan bog'laning\n\n"
-        "⚙️ <b>Buyruqlar:</b>\n"
-        "/start - Botni ishga tushirish\n"
-        "/help - Yordam\n"
-        "/cancel - Amalni bekor qilish\n"
-        "/stats - Statistika"
+        "📚 <b>YORDAM VA BUYRUQLAR</b>\n\n"
+        "🎯 <b>Asosiy buyruqlar:</b>\n"
+        "/start - Botni qayta boshlash\n"
+        "/help - Yordam ko'rsatish\n"
+        "/cancel - Jarayonni bekor qilish\n"
+        "/menu - Asosiy menyu\n\n"
+        
+        "📝 <b>Transliteratsiya:</b>\n"
+        "/lat2kir - Lotin → Kiril\n"
+        "/kir2lat - Kiril → Lotin\n\n"
+        
+        "🎵 <b>Audio funksiyalar:</b>\n"
+        "/music - Musiqa tahrirlash\n"
+        "/cut - Ovoz kesish\n"
+        "/convert - MP3 formatga\n\n"
+        
+        "💬 <b>Boshqa:</b>\n"
+        "/chat - AI bilan suhbat\n"
+        "/stats - Statistika\n"
+        "/admin - Adminga xabar\n\n"
+        
+        "💡 <b>Maslahat:</b>\n"
+        "Har bir funksiyani ishlatish uchun tegishli tugmani bosing yoki buyruqni yozing!"
     )
     
     await update.message.reply_text(help_text, parse_mode='HTML')
 
-async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Statistika buyrug'i"""
-    total = len(context.bot_data.get('users', set()))
+async def menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Asosiy menyuga qaytish"""
+    context.user_data.clear()
     await update.message.reply_text(
-        f"📊 <b>Bot statistikasi</b>\n\n"
-        f"👥 Foydalanuvchilar: <b>{total}</b> ta",
+        "🏠 <b>Asosiy menyu</b>\n\nKerakli bo'limni tanlang:",
+        reply_markup=MAIN_MARKUP,
         parse_mode='HTML'
     )
 
-async def handle_button_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Tugmalar bosish"""
-    text = update.message.text.strip()
-    uid = update.message.from_user.id
-    context.bot_data.setdefault('users', set())
-    context.bot_data['users'].add(uid)
+async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Statistika"""
+    total = len(context.bot_data.get('users', set()))
+    await update.message.reply_text(
+        f"📊 <b>BOT STATISTIKASI</b>\n\n"
+        f"👥 Foydalanuvchilar: <b>{total}</b> ta\n"
+        f"🤖 Bot versiyasi: <b>2.0</b>\n"
+        f"⚡ Status: <b>Faol</b>",
+        parse_mode='HTML'
+    )
 
-    modes = {
-        "📝 Lotin → Kiril": ('lat2kir', "✏️ Lotincha matn yuboring:", "📝"),
-        "📝 Kiril → Lotin": ('kir2lat', "✏️ Kirilcha matn yuboring:", "📝"),
-        "✂️ Ovoz kesuvchi": ('voice_cutter', "🎵 Audio yuboring, keyin vaqt yozing (00:10-00:20):", "✂️"),
-        "🎶 Ovozni Musiqaga aylantirish": ('voice_to_music', "🎶 Audio yuboring:", "🎶"),
-        "💬 ChatBot": ('chat', "💬 Savolingizni yuboring:", "💬"),
-        "🎵 Musiqa tahrirlash": ('music_edit', "🎵 Musiqa faylini yuboring (MP3):", "🎵"),
-        "📩 Adminga xabar": ('admin_msg', "📩 Xabar matnini yozing:", "📩"),
+# ===================== MODE COMMANDS =====================
+async def lat2kir_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lotin → Kiril mode"""
+    context.user_data['mode'] = 'lat2kir'
+    await update.message.reply_text(
+        "📝 <b>LOTIN → KIRIL</b>\n\n"
+        "✏️ Lotincha matn yuboring, men uni kirilga o'giraman!\n\n"
+        "📌 <i>Misol: Salom dunyo → Салом дунё</i>",
+        reply_markup=CANCEL_MARKUP,
+        parse_mode='HTML'
+    )
+
+async def kir2lat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kiril → Lotin mode"""
+    context.user_data['mode'] = 'kir2lat'
+    await update.message.reply_text(
+        "📝 <b>KIRIL → LOTIN</b>\n\n"
+        "✏️ Kirilcha matn yuboring, men uni lotinga o'giraman!\n\n"
+        "📌 <i>Misol: Салом дунё → Salom dunyo</i>",
+        reply_markup=CANCEL_MARKUP,
+        parse_mode='HTML'
+    )
+
+async def chat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """ChatBot mode"""
+    context.user_data['mode'] = 'chat'
+    await update.message.reply_text(
+        "💬 <b>AI CHATBOT</b>\n\n"
+        "🤖 Menga savol bering, men javob beraman!\n\n"
+        "📌 <i>Masalan: \"Python dasturlash haqida gapirib ber\"</i>",
+        reply_markup=CANCEL_MARKUP,
+        parse_mode='HTML'
+    )
+
+async def music_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Musiqa tahrirlash mode"""
+    context.user_data['mode'] = 'music_edit'
+    await update.message.reply_text(
+        "🎵 <b>MUSIQA TAHRIRLASH</b>\n\n"
+        "📁 MP3 faylini yuboring!\n\n"
+        "Men uning <b>Title</b> (Qo'shiq nomi) va <b>Author</b> (Ijrochi)ni o'zgartiraman.\n\n"
+        "💡 <i>Fayl yuklangandan keyin ko'rsatma beraman!</i>",
+        reply_markup=CANCEL_MARKUP,
+        parse_mode='HTML'
+    )
+
+async def cut_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ovoz kesish mode"""
+    context.user_data['mode'] = 'voice_cutter'
+    await update.message.reply_text(
+        "✂️ <b>OVOZ KESUVCHI</b>\n\n"
+        "🎵 Audio fayl yuboring!\n\n"
+        "Keyin vaqtni kiriting:\n"
+        "📌 <b>Format:</b> 00:10-00:30\n\n"
+        "💡 <i>(10-soniyadan 30-soniyagacha kesadi)</i>",
+        reply_markup=CANCEL_MARKUP,
+        parse_mode='HTML'
+    )
+
+async def convert_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """MP3 ga aylantirish mode"""
+    context.user_data['mode'] = 'voice_to_music'
+    await update.message.reply_text(
+        "🎶 <b>MP3 GA AYLANTIRISH</b>\n\n"
+        "🎤 Audio yoki ovoz xabari yuboring!\n\n"
+        "Men uni <b>MP3 formatga</b> aylantirib beraman.\n\n"
+        "⚡ <i>Tez va sifatli!</i>",
+        reply_markup=CANCEL_MARKUP,
+        parse_mode='HTML'
+    )
+
+async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Adminga xabar mode"""
+    context.user_data['mode'] = 'admin_msg'
+    await update.message.reply_text(
+        "📩 <b>ADMINGA XABAR</b>\n\n"
+        "✉️ Xabar matnini yozing!\n\n"
+        "Admin ko'rib, javob beradi.\n\n"
+        "💡 <i>Iltimos, savol yoki taklifingizni aniq yozing.</i>",
+        reply_markup=CANCEL_MARKUP,
+        parse_mode='HTML'
+    )
+
+# ===================== BUTTON HANDLER =====================
+async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tugmalarni boshqarish"""
+    text = update.message.text.strip()
+    
+    button_map = {
+        "📝 Lotin → Kiril": lat2kir_cmd,
+        "📝 Kiril → Lotin": kir2lat_cmd,
+        "💬 ChatBot": chat_cmd,
+        "🎵 Musiqa tahrirlash": music_cmd,
+        "✂️ Ovoz kesuvchi": cut_cmd,
+        "🎶 MP3 ga aylantirish": convert_cmd,
+        "📊 Statistika": stats_cmd,
+        "📩 Adminga xabar": admin_cmd,
+        "❌ Bekor qilish": cancel,
     }
     
-    if text in modes:
-        mode_data = modes[text]
-        context.user_data['mode'] = mode_data[0]
-        emoji = mode_data[2] if len(mode_data) > 2 else ""
-        await update.message.reply_sticker(
-            "CAACAgIAAxkBAAEBVCJnYXZkZGVmYWNlAAECAwQFBgcICQoL"  # Sticker ID
-        ) if emoji else None
-        await update.message.reply_text(mode_data[1])
-    elif text == "📊 Statistika":
-        total = len(context.bot_data.get('users', set()))
-        await update.message.reply_text(
-            f"📊 <b>Foydalanuvchilar soni:</b> {total} ta",
-            parse_mode='HTML'
-        )
+    if text in button_map:
+        await button_map[text](update, context)
     else:
-        await update.message.reply_text("❗ Tugmani tanlang:", reply_markup=REPLY_MARKUP)
+        await update.message.reply_text(
+            "❓ Noma'lum tugma. /help buyrug'ini kiriting.",
+            reply_markup=MAIN_MARKUP
+        )
 
+# ===================== TEXT HANDLER =====================
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Matn xabarlarni qayta ishlash"""
     mode = context.user_data.get('mode')
     text = update.message.text or ""
     uid = update.message.from_user.id
-
-    if not mode:
-        await update.message.reply_text("❗ Avval tugmani tanlang:", reply_markup=REPLY_MARKUP)
+    
+    # Agar bekor qilish bo'lsa
+    if text == "❌ Bekor qilish":
+        await cancel(update, context)
         return
-
+    
+    if not mode:
+        await update.message.reply_text(
+            "❗ Iltimos, avval bo'limni tanlang!\n\n"
+            "Tugmalardan birini bosing yoki /help buyrug'ini kiriting.",
+            reply_markup=MAIN_MARKUP
+        )
+        return
+    
+    # Lotin → Kiril
     if mode == 'lat2kir':
         result = to_cyrillic(text)
-        await update.message.reply_text(f"✅ <b>Natija:</b>\n\n{result}", parse_mode='HTML')
+        await update.message.reply_text(
+            f"✅ <b>NATIJA:</b>\n\n{result}\n\n"
+            f"📝 <i>Yana matn yuboring yoki /menu bilan chiqing</i>",
+            parse_mode='HTML'
+        )
     
+    # Kiril → Lotin
     elif mode == 'kir2lat':
         result = to_latin(text)
-        await update.message.reply_text(f"✅ <b>Natija:</b>\n\n{result}", parse_mode='HTML')
+        await update.message.reply_text(
+            f"✅ <b>NATIJA:</b>\n\n{result}\n\n"
+            f"📝 <i>Yana matn yuboring yoki /menu bilan chiqing</i>",
+            parse_mode='HTML'
+        )
     
+    # ChatBot
     elif mode == 'chat':
-        msg = await update.message.reply_text("💬 Javob yozilmoqda...")
-        reply = call_gemini(f"Foydalanuvchi: {text}\nYordamchi:")
-        await msg.edit_text(f"🤖 <b>Javob:</b>\n\n{reply}", parse_mode='HTML')
+        msg = await update.message.reply_text("💬 Javob tayyorlanmoqda...")
+        reply = call_gemini(f"Foydalanuvchi so'rovi: {text}\n\nJavob bering:")
+        await msg.edit_text(
+            f"🤖 <b>JAVOB:</b>\n\n{reply}\n\n"
+            f"💬 <i>Yana savol bering yoki /menu bilan chiqing</i>",
+            parse_mode='HTML'
+        )
     
+    # Ovoz kesish vaqti
     elif mode == 'voice_wait_time':
         await process_voice_cut(update, context, text)
     
+    # Musiqa title
     elif mode == 'music_wait_title':
         context.user_data['music_title'] = text
         context.user_data['mode'] = 'music_wait_author'
-        await update.message.reply_text("👤 Endi <b>Author</b> (Ijrochi) nomini kiriting:", parse_mode='HTML')
+        await update.message.reply_text(
+            f"✅ Title qabul qilindi: <b>{text}</b>\n\n"
+            f"👤 Endi <b>Author</b> (Ijrochi) nomini kiriting:",
+            parse_mode='HTML'
+        )
     
+    # Musiqa author
     elif mode == 'music_wait_author':
         context.user_data['music_author'] = text
         await process_music_edit(update, context)
     
+    # Adminga xabar
     elif mode == 'admin_msg':
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton("✉️ Javob berish", callback_data=f"reply_{uid}")]])
+        markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✉️ Javob berish", callback_data=f"reply_{uid}")
+        ]])
         await context.bot.send_message(
             ADMIN_ID,
-            f"📨 <b>Xabar (ID: {uid})</b>\n\n{text}",
+            f"📨 <b>YANGI XABAR</b>\n\n"
+            f"👤 Foydalanuvchi ID: <code>{uid}</code>\n"
+            f"📝 Xabar:\n\n{text}",
             reply_markup=markup,
             parse_mode='HTML'
         )
-        await update.message.reply_text("✅ Xabaringiz adminga yuborildi! 📬")
-        context.user_data['mode'] = None
+        await update.message.reply_text(
+            "✅ <b>Xabaringiz yuborildi!</b>\n\n"
+            "📬 Admin ko'rib chiqadi va javob beradi.",
+            reply_markup=MAIN_MARKUP,
+            parse_mode='HTML'
+        )
+        context.user_data.clear()
     
+    # Admin javobi
     elif mode == 'reply_user' and uid == ADMIN_ID:
         target = context.user_data.get('reply_to_user')
         if target:
             await context.bot.send_message(
                 target,
-                f"💌 <b>Admin javobi:</b>\n\n{text}",
+                f"💌 <b>ADMIN JAVOBI:</b>\n\n{text}",
                 parse_mode='HTML'
             )
-            await update.message.reply_text("✅ Javob yuborildi! 📤")
-            context.user_data['reply_to_user'] = None
-            context.user_data['mode'] = None
+            await update.message.reply_text(
+                "✅ Javob yuborildi!",
+                reply_markup=MAIN_MARKUP
+            )
+            context.user_data.clear()
 
+# ===================== AUDIO HANDLERS =====================
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Audio fayllarni qayta ishlash"""
     mode = context.user_data.get('mode')
-    audio = update.message.audio or update.message.voice
+    audio = update.message.audio
     
     if not audio:
-        await update.message.reply_text("❗ Audio topilmadi.")
+        await update.message.reply_text("❌ Audio fayl topilmadi!")
         return
     
     if mode == 'music_edit':
-        file = await audio.get_file()
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-            path = f.name
-            await file.download_to_drive(path)
-        
-        context.user_data['music_file'] = path
-        context.user_data['mode'] = 'music_wait_title'
-        await update.message.reply_text("✅ Musiqa yuklandi! 🎵\n\n📝 Endi <b>Title</b> (Qo'shiq nomi) kiriting:", parse_mode='HTML')
+        msg = await update.message.reply_text("📥 Fayl yuklanmoqda...")
+        try:
+            file = await audio.get_file()
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+                path = f.name
+                await file.download_to_drive(path)
+            
+            context.user_data['music_file'] = path
+            context.user_data['mode'] = 'music_wait_title'
+            
+            await msg.edit_text(
+                "✅ <b>Musiqa yuklandi!</b> 🎵\n\n"
+                "📝 Endi <b>Title</b> (Qo'shiq nomi) kiriting:\n\n"
+                "💡 <i>Masalan: \"Muhabbat qo'shig'i\"</i>",
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            await msg.edit_text(f"❌ Xatolik: {e}")
+            context.user_data.clear()
     
     elif mode in ('voice_cutter', 'voice_to_music'):
         await handle_voice(update, context)
     
     else:
         await update.message.reply_text(
-            "❗ Avval tegishli tugmani bosing:\n"
-            "• 🎵 Musiqa tahrirlash\n"
-            "• ✂️ Ovoz kesuvchi\n"
-            "• 🎶 Musiqaga aylantirish",
-            reply_markup=REPLY_MARKUP
+            "❗ Iltimos, avval tegishli bo'limni tanlang:\n"
+            "• /music - Musiqa tahrirlash\n"
+            "• /cut - Ovoz kesish\n"
+            "• /convert - MP3 ga aylantirish",
+            reply_markup=MAIN_MARKUP
         )
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -401,73 +506,190 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     voice = update.message.voice or update.message.audio
     
     if not voice:
-        await update.message.reply_text("❗ Audio topilmadi.")
+        await update.message.reply_text("❌ Audio topilmadi!")
         return
     
     if mode not in ('voice_cutter', 'voice_to_music'):
-        await update.message.reply_text("❗ Avval 'Ovoz kesuvchi' yoki 'Musiqaga aylantirish' tugmasini bosing.")
-        return
-
-    file = await voice.get_file()
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-        path = f.name
-        await file.download_to_drive(path)
-
-    if mode == 'voice_cutter':
-        context.user_data['voice_file'] = path
-        context.user_data['mode'] = 'voice_wait_time'
         await update.message.reply_text(
-            "✅ Audio yuklandi! ⏰\n\n"
-            "Kesish vaqtini kiriting:\n"
-            "<b>Format:</b> 00:10-00:20",
-            parse_mode='HTML'
+            "❗ Iltimos, avval bo'limni tanlang:\n"
+            "• /cut - Ovoz kesish\n"
+            "• /convert - MP3 ga aylantirish",
+            reply_markup=MAIN_MARKUP
         )
+        return
     
-    elif mode == 'voice_to_music':
-        msg = await update.message.reply_text("🎵 Qayta ishlanmoqda...")
-        try:
+    msg = await update.message.reply_text("📥 Audio yuklanmoqda...")
+    
+    try:
+        file = await voice.get_file()
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+            path = f.name
+            await file.download_to_drive(path)
+        
+        if mode == 'voice_cutter':
+            context.user_data['voice_file'] = path
+            context.user_data['mode'] = 'voice_wait_time'
+            
             audio = AudioSegment.from_file(path)
+            duration = len(audio) // 1000
+            minutes = duration // 60
+            seconds = duration % 60
+            
+            await msg.edit_text(
+                f"✅ <b>Audio yuklandi!</b> ⏱\n\n"
+                f"📊 Uzunlik: <b>{minutes:02d}:{seconds:02d}</b>\n\n"
+                f"✂️ Kesish vaqtini kiriting:\n"
+                f"📌 <b>Format:</b> 00:10-00:30\n\n"
+                f"💡 <i>00:00 dan {minutes:02d}:{seconds:02d} gacha</i>",
+                parse_mode='HTML'
+            )
+        
+        elif mode == 'voice_to_music':
+            await msg.edit_text("🔄 Qayta ishlanmoqda...")
+            audio = AudioSegment.from_file(path)
+            
             with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f2:
                 out_path = f2.name
-                audio.export(out_path, format="mp3")
+                audio.export(out_path, format="mp3", bitrate="192k")
+            
             await msg.delete()
             with open(out_path, "rb") as audio_file:
-                await update.message.reply_audio(audio_file, caption="🎶 Tayyor! ✅")
+                await update.message.reply_audio(
+                    audio_file,
+                    caption="✅ <b>Tayyor!</b> 🎶\n\n<i>Yana audio yuboring yoki /menu bilan chiqing</i>",
+                    parse_mode='HTML'
+                )
+            
             os.remove(out_path)
-        except Exception as e:
-            await msg.edit_text(f"❌ Xatolik: {e}")
-        finally:
             os.remove(path)
-            context.user_data['mode'] = None
+            
+    except Exception as e:
+        await msg.edit_text(f"❌ Xatolik yuz berdi: {e}")
+        logger.exception("Audio processing error")
+        context.user_data.clear()
+
+# ===================== PROCESS FUNCTIONS =====================
+async def process_voice_cut(update: Update, context: ContextTypes.DEFAULT_TYPE, time_text: str):
+    """Ovozni kesish jarayoni"""
+    voice_file = context.user_data.get('voice_file')
+    
+    if not voice_file or not os.path.exists(voice_file):
+        await update.message.reply_text(
+            "❌ Audio fayl topilmadi!\n\n"
+            "Iltimos, qaytadan /cut buyrug'ini kiriting.",
+            reply_markup=MAIN_MARKUP
+        )
+        context.user_data.clear()
+        return
+    
+    # Vaqt formatini tekshirish
+    match = re.match(r"(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})", time_text.strip())
+    if not match:
+        await update.message.reply_text(
+            "❌ <b>Format xato!</b>\n\n"
+            "📌 To'g'ri format: <code>00:10-00:30</code>\n\n"
+            "💡 Yana urinib ko'ring:",
+            parse_mode='HTML'
+        )
+        return
+    
+    s_min, s_sec, e_min, e_sec = map(int, match.groups())
+    start_ms = (s_min * 60 + s_sec) * 1000
+    end_ms = (e_min * 60 + e_sec) * 1000
+    
+    if start_ms >= end_ms:
+        await update.message.reply_text(
+            "❌ <b>Xato!</b>\n\n"
+            "Boshlanish vaqti tugash vaqtidan kichik bo'lishi kerak!\n\n"
+            "💡 Qayta kiriting:",
+            parse_mode='HTML'
+        )
+        return
+    
+    msg = await update.message.reply_text("✂️ Kesilmoqda...")
+    
+    try:
+        audio = AudioSegment.from_file(voice_file)
+        
+        if end_ms > len(audio):
+            duration = len(audio) // 1000
+            minutes = duration // 60
+            seconds = duration % 60
+            await msg.edit_text(
+                f"❌ <b>Vaqt xato!</b>\n\n"
+                f"📊 Audio uzunligi: <b>{minutes:02d}:{seconds:02d}</b>\n\n"
+                f"💡 Vaqtni qayta kiriting:",
+                parse_mode='HTML'
+            )
+            return
+        
+        # Kesish
+        cut_audio = audio[start_ms:end_ms]
+        
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+            cut_path = f.name
+            cut_audio.export(cut_path, format="mp3", bitrate="192k")
+        
+        await msg.delete()
+        
+        duration = len(cut_audio) // 1000
+        with open(cut_path, "rb") as audio_file:
+            await update.message.reply_audio(
+                audio_file,
+                caption=f"✅ <b>Audio kesildi!</b> ✂️\n\n"
+                        f"⏱ Uzunlik: <b>{duration} soniya</b>\n\n"
+                        f"<i>Yana kesish uchun audio yuboring yoki /menu</i>",
+                parse_mode='HTML'
+            )
+        
+        os.remove(cut_path)
+        
+    except Exception as e:
+        await msg.edit_text(f"❌ Xatolik: {e}")
+        logger.exception("Voice cut error")
+    
+    finally:
+        if os.path.exists(voice_file):
+            os.remove(voice_file)
+        context.user_data.pop('voice_file', None)
 
 async def process_music_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Musiqa metadata tahrirlash"""
     music_file = context.user_data.get('music_file')
-    title = context.user_data.get('music_title', 'Unknown Title')
-    author = context.user_data.get('music_author', 'Unknown Artist')
+    title = context.user_data.get('music_title', 'Unknown')
+    author = context.user_data.get('music_author', 'Unknown')
     
-    if not music_file:
-        await update.message.reply_text("❗ Avval musiqa faylini yuboring.")
-        context.user_data['mode'] = 'music_edit'
+    if not music_file or not os.path.exists(music_file):
+        await update.message.reply_text(
+            "❌ Musiqa fayli topilmadi!\n\n"
+            "Iltimos, qaytadan /music buyrug'ini kiriting.",
+            reply_markup=MAIN_MARKUP
+        )
+        context.user_data.clear()
         return
     
     msg = await update.message.reply_text("🎵 Metadata o'zgartirilmoqda...")
     
     try:
-        # MP3 faylni yaratish va metadata qo'shish
+        # Audio faylni o'qish
         audio = AudioSegment.from_file(music_file)
         
+        # Yangi fayl yaratish
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
             output_path = f.name
-            audio.export(output_path, format="mp3")
+            audio.export(output_path, format="mp3", bitrate="192k")
         
-        # ID3 tag qo'shish
+        # ID3 tags qo'shish
         try:
             audio_file = MP3(output_path, ID3=ID3)
-            audio_file.add_tags()
+            try:
+                audio_file.add_tags()
+            except:
+                pass
         except:
             audio_file = MP3(output_path)
         
+        # Metadata yozish
         audio_file.tags.add(TIT2(encoding=3, text=title))
         audio_file.tags.add(TPE1(encoding=3, text=author))
         audio_file.save()
@@ -480,76 +702,25 @@ async def process_music_edit(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f,
                 title=title,
                 performer=author,
-                caption=f"✅ <b>Tayyor!</b>\n\n🎵 <b>Title:</b> {title}\n👤 <b>Author:</b> {author}",
+                caption=f"✅ <b>Tayyor!</b> 🎵\n\n"
+                        f"📝 <b>Title:</b> {title}\n"
+                        f"👤 <b>Author:</b> {author}\n\n"
+                        f"<i>Yana tahrirlash uchun /music</i>",
                 parse_mode='HTML'
             )
         
         os.remove(output_path)
         
     except Exception as e:
-        await msg.edit_text(f"❌ Xatolik yuz berdi: {e}")
+        await msg.edit_text(f"❌ Xatolik: {e}")
+        logger.exception("Music edit error")
     
     finally:
         if os.path.exists(music_file):
             os.remove(music_file)
-        context.user_data['music_file'] = None
-        context.user_data['music_title'] = None
-        context.user_data['music_author'] = None
-        context.user_data['mode'] = None
+        context.user_data.clear()
 
-async def process_voice_cut(update: Update, context: ContextTypes.DEFAULT_TYPE, time_text: str):
-    """Ovozni kesish"""
-    voice_file = context.user_data.get('voice_file')
-    if not voice_file:
-        await update.message.reply_text("❗ Avval audio yuboring.")
-        context.user_data['mode'] = 'voice_cutter'
-        return
-    
-    match = re.match(r"(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})", time_text.strip())
-    if not match:
-        await update.message.reply_text(
-            "❗ Format xato!\n\n<b>To'g'ri format:</b> 00:10-00:20",
-            parse_mode='HTML'
-        )
-        return
-    
-    s_min, s_sec, e_min, e_sec = map(int, match.groups())
-    start_ms = (s_min * 60 + s_sec) * 1000
-    end_ms = (e_min * 60 + e_sec) * 1000
-    
-    if start_ms >= end_ms:
-        await update.message.reply_text("❗ Boshlanish vaqti tugash vaqtidan kichik bo'lishi kerak!")
-        return
-    
-    msg = await update.message.reply_text("✂️ Kesilmoqda...")
-    try:
-        audio = AudioSegment.from_file(voice_file)
-        if end_ms > len(audio):
-            duration = len(audio) // 1000
-            await msg.edit_text(
-                f"❗ Audio uzunligi: <b>{duration}</b> soniya.\n\n"
-                f"Vaqtni qayta kiriting.",
-                parse_mode='HTML'
-            )
-            return
-        
-        cut_audio = audio[start_ms:end_ms]
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-            cut_path = f.name
-            cut_audio.export(cut_path, format="mp3")
-        
-        await msg.delete()
-        with open(cut_path, "rb") as audio_file:
-            await update.message.reply_audio(audio_file, caption="✅ Audio kesildi! ✂️")
-        os.remove(cut_path)
-    except Exception as e:
-        await msg.edit_text(f"❌ Xatolik: {e}")
-    finally:
-        if os.path.exists(voice_file):
-            os.remove(voice_file)
-        context.user_data['voice_file'] = None
-        context.user_data['mode'] = None
-
+# ===================== CALLBACK HANDLER =====================
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Inline tugmalar callback"""
     query = update.callback_query
@@ -559,60 +730,96 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = int(query.data.split("_")[1])
         context.user_data['reply_to_user'] = user_id
         context.user_data['mode'] = 'reply_user'
+        
         await query.message.reply_text(
-            f"✏️ Foydalanuvchi <b>{user_id}</b> ga javob yozing:",
+            f"✏️ <b>Foydalanuvchi {user_id} ga javob:</b>\n\n"
+            f"Javob matnini yozing:",
             parse_mode='HTML'
         )
 
+# ===================== CANCEL =====================
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Amalni bekor qilish"""
+    # Fayllarni tozalash
     voice_file = context.user_data.get('voice_file')
     music_file = context.user_data.get('music_file')
     
-    # Vaqtinchalik fayllarni tozalash
     if voice_file and os.path.exists(voice_file):
         os.remove(voice_file)
     if music_file and os.path.exists(music_file):
         os.remove(music_file)
     
     context.user_data.clear()
+    
     await update.message.reply_text(
         "❌ <b>Amal bekor qilindi!</b>\n\n"
-        "Bosh menyuga qaytdingiz. 🏠",
-        reply_markup=REPLY_MARKUP,
+        "🏠 Bosh menyuga qaytdingiz.",
+        reply_markup=MAIN_MARKUP,
         parse_mode='HTML'
     )
 
+# ===================== ERROR HANDLER =====================
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Global xatolarni tutish"""
+    logger.error(f"Update {update} caused error {context.error}")
+    
+    if isinstance(update, Update) and update.effective_message:
+        await update.effective_message.reply_text(
+            "❌ <b>Xatolik yuz berdi!</b>\n\n"
+            "Iltimos, qaytadan urinib ko'ring yoki /start buyrug'ini kiriting.",
+            parse_mode='HTML',
+            reply_markup=MAIN_MARKUP
+        )
+
+# ===================== MAIN =====================
 def main():
     """Botni ishga tushirish"""
+    logger.info("🤖 Bot ishga tushmoqda...")
+    
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
-    # Buyruqlar
+    # ===== BUYRUQLAR =====
+    # Asosiy
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("cancel", cancel))
+    app.add_handler(CommandHandler("menu", menu_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
     
-    # Tugmalar
-    button_filter = filters.TEXT & filters.Regex(
-        r"^(📝 Lotin → Kiril|📝 Kiril → Lotin|💬 ChatBot|🎵 Musiqa tahrirlash|📊 Statistika|📩 Adminga xabar|✂️ Ovoz kesuvchi|🎶 Ovozni Musiqaga aylantirish)$"
-    )
-    app.add_handler(MessageHandler(button_filter, handle_button_choice))
+    # Funksional
+    app.add_handler(CommandHandler("lat2kir", lat2kir_cmd))
+    app.add_handler(CommandHandler("kir2lat", kir2lat_cmd))
+    app.add_handler(CommandHandler("chat", chat_cmd))
+    app.add_handler(CommandHandler("music", music_cmd))
+    app.add_handler(CommandHandler("cut", cut_cmd))
+    app.add_handler(CommandHandler("convert", convert_cmd))
+    app.add_handler(CommandHandler("admin", admin_cmd))
     
-    # Audio va ovoz
+    # ===== TUGMALAR =====
+    button_filter = filters.TEXT & filters.Regex(
+        r"^(📝 Lotin → Kiril|📝 Kiril → Lotin|💬 ChatBot|🎵 Musiqa tahrirlash|"
+        r"✂️ Ovoz kesuvchi|🎶 MP3 ga aylantirish|📊 Statistika|📩 Adminga xabar|❌ Bekor qilish)$"
+    )
+    app.add_handler(MessageHandler(button_filter, handle_buttons))
+    
+    # ===== MEDIA =====
     app.add_handler(MessageHandler(filters.AUDIO, handle_audio))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     
-    # Callback (admin javob)
+    # ===== CALLBACK =====
     app.add_handler(CallbackQueryHandler(button_callback))
     
-    # Matn (eng oxirida)
+    # ===== MATN =====
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
     
-    logger.info("🤖 Bot muvaffaqiyatli ishga tushdi!")
-    logger.info("📊 Foydalanish uchun /start buyrug'ini yuboring")
-    app.run_polling()
+    # ===== ERROR HANDLER =====
+    app.add_error_handler(error_handler)
+    
+    logger.info("✅ Bot muvaffaqiyatli ishga tushdi!")
+    logger.info("📱 Telegram botingiz tayyor!")
+    
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
-    
+            "
