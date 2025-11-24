@@ -374,23 +374,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Lotin → Kiril
+   # Lotin → Kiril
     if mode == 'lat2kir':
         result = to_cyrillic(text)
         await update.message.reply_text(
-            f"result}\n\n"
+            f"{result}\n\n"
             f"📝 <i>Yana matn yuboring yoki /menu bilan chiqing</i>",
-            parse_mode='HTML'
-        )
-    
-    # Kiril → Lotin
+            parse_mode='HTML')
+
+# Kiril → Lotin
     elif mode == 'kir2lat':
         result = to_latin(text)
         await update.message.reply_text(
             f"{result}\n\n"
             f"📝 <i>Yana matn yuboring yoki /menu bilan chiqing</i>",
-            parse_mode='HTML'
-        )
+            parse_mode='HTML')
+
     
     # ChatBot
     elif mode == 'chat':
