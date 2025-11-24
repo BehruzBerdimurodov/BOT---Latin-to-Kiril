@@ -378,7 +378,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if mode == 'lat2kir':
         result = to_cyrillic(text)
         await update.message.reply_text(
-            f"✅ <b>NATIJA:</b>\n\n{result}\n\n"
+            f"result}\n\n"
             f"📝 <i>Yana matn yuboring yoki /menu bilan chiqing</i>",
             parse_mode='HTML'
         )
@@ -387,7 +387,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif mode == 'kir2lat':
         result = to_latin(text)
         await update.message.reply_text(
-            f"✅ <b>NATIJA:</b>\n\n{result}\n\n"
+            f"{result}\n\n"
             f"📝 <i>Yana matn yuboring yoki /menu bilan chiqing</i>",
             parse_mode='HTML'
         )
