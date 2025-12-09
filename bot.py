@@ -98,13 +98,23 @@ def to_latin(text):
     """Kirildan lotinga transliteratsiya - barcha xatolar tuzatildi"""
     
     def fix_E(text):
+        # 1. "Э" harfi har doim "E" bo'ladi (zamonaviy o'zbek lotin alifbosi)
         text = text.replace("Э", "E").replace("э", "e")
+
+        # 2. So'z boshidagi "Е" -> "Ye" (Masalan: Еr -> Yer, Еtti -> Yetti)
         text = re.sub(r"\bЕ", "Ye", text)
         text = re.sub(r"\bе", "ye", text)
-        vowels = "АаЕеЁёИиОоУуЭэЮюЯяЎўҚқҒғҲҳ"
-        text = re.sub(rf"([{vowels}])Е", r"\1ye", text)
+
+        # 3. Unlidan keyin kelgan "Е" -> "Ye" (Masalan: Muayyan, ssenariye)
+        # DIQQAT: Bu yerda Q, G', H kabi undoshlar bo'lmasligi kerak!
+        vowels = "АаЕеЁёИиОоУуЎўЮюЯя" 
+        text = re.sub(rf"([{vowels}])Е", r"\1Ye", text)
         text = re.sub(rf"([{vowels}])е", r"\1ye", text)
-        text = text.replace("Е", "e").replace("е", "e")
+        
+        # 4. Qolgan holatlarda (undoshlardan keyin) "Е" -> "E"
+        # (Masalan: Hеch -> Hech, Darvoqе -> Darvoqe, Voqеa -> Voqea)
+        text = text.replace("Е", "E").replace("е", "e")
+        
         return text
     
     text = fix_E(text)
@@ -134,14 +144,14 @@ def to_latin(text):
         'м':'m','н':'n','о':'o','п':'p','р':'r',
         'с':'s','т':'t','у':'u','ф':'f','х':'x',
         'ц':'ts','щ':'shch','ъ':"'",'ь':'','ы':'i',
-        'э':'e',
+        'e':'e', 
         
         'А':'A','Б':'B','В':'V','Г':'G','Д':'D',
         'З':'Z','И':'I','Й':'Y','К':'K','Л':'L',
         'М':'M','Н':'N','О':'O','П':'P','Р':'R',
         'С':'S','Т':'T','У':'U','Ф':'F','Х':'X',
         'Ц':'Ts','Щ':'Shch','Ъ':"'",'Ь':'','Ы':'I',
-        'Э':'E'
+        'E':'E'
     }
     
     return ''.join(chars.get(ch, ch) for ch in text)
