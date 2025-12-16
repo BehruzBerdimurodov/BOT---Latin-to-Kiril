@@ -388,7 +388,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if mode == 'lat2kir':
         result = to_cyrillic(text)
         await update.message.reply_text(
-            f"{result}"
+            f"{result}",
             parse_mode='HTML')
 
 # Kiril → Lotin
