@@ -93,33 +93,22 @@ def to_cyrillic(text):
     
     return ''.join(mapping.get(ch, ch) for ch in text)
 
-# ===================== KIRIL → LOTIN (TUZATILGAN) =====================
+# ===================== KIRIL → LOTIN =====================
 def to_latin(text):
-    """Kirildan lotinga transliteratsiya - barcha xatolar tuzatildi"""
+    """Kirildan lotinga transliteratsiya"""
     
     def fix_E(text):
-        # 1. "Э" harfi har doim "E" bo'ladi (zamonaviy o'zbek lotin alifbosi)
         text = text.replace("Э", "E").replace("э", "e")
-
-        # 2. So'z boshidagi "Е" -> "Ye" (Masalan: Еr -> Yer, Еtti -> Yetti)
         text = re.sub(r"\bЕ", "Ye", text)
         text = re.sub(r"\bе", "ye", text)
-
-        # 3. Unlidan keyin kelgan "Е" -> "Ye" (Masalan: Muayyan, ssenariye)
-        # DIQQAT: Bu yerda Q, G', H kabi undoshlar bo'lmasligi kerak!
         vowels = "АаЕеЁёИиОоУуЎўЮюЯя" 
         text = re.sub(rf"([{vowels}])Е", r"\1Ye", text)
         text = re.sub(rf"([{vowels}])е", r"\1ye", text)
-        
-        # 4. Qolgan holatlarda (undoshlardan keyin) "Е" -> "E"
-        # (Masalan: Hеch -> Hech, Darvoqе -> Darvoqe, Voqеa -> Voqea)
         text = text.replace("Е", "E").replace("е", "e")
-        
         return text
     
     text = fix_E(text)
     
-    # Murakkab kombinatsiyalar
     mapping = [
         ('қў',"qo'"),('Қў',"Qo'"),
         ('ё','yo'),('Ё','Yo'),
@@ -142,7 +131,7 @@ def to_latin(text):
         'а':'a','б':'b','в':'v','г':'g','д':'d',
         'з':'z','и':'i','й':'y','к':'k','л':'l',
         'м':'m','н':'n','о':'o','п':'p','р':'r',
-        'с':'s','т':'t','у':'u','ф':'f','х':'x',
+        's':'s','т':'t','у':'u','ф':'f','х':'x',
         'ц':'ts','щ':'shch','ъ':"'",'ь':'','ы':'i',
         'e':'e', 
         
@@ -158,7 +147,6 @@ def to_latin(text):
 
 # ===================== AI FUNCTION =====================
 def call_gemini(prompt: str) -> str:
-    """Gemini AI bilan ishlash"""
     try:
         response = model.generate_content(prompt)
         return response.text
@@ -171,9 +159,17 @@ MAIN_KEYBOARD = [
     ["📝 Lotin → Kiril", "📝 Kiril → Lotin"],
     ["💬 ChatBot", "🎵 Musiqa tahrirlash"],
     ["✂️ Ovoz kesuvchi", "🎶 MP3 ga aylantirish"],
-    ["📊 Statistika", "📩 Adminga xabar"]
+    ["🎛 Remix Voices", "📊 Statistika"],  # <--- YANGI TUGMA QO'SHILDI
+    ["📩 Adminga xabar"]
 ]
 MAIN_MARKUP = ReplyKeyboardMarkup(MAIN_KEYBOARD, resize_keyboard=True)
+
+# Remix rejimi uchun maxsus klaviatura
+REMIX_KEYBOARD = [
+    ["▶️ Remix Start"], 
+    ["❌ Bekor qilish"]
+]
+REMIX_MARKUP = ReplyKeyboardMarkup(REMIX_KEYBOARD, resize_keyboard=True)
 
 CANCEL_KEYBOARD = [["❌ Bekor qilish"]]
 CANCEL_MARKUP = ReplyKeyboardMarkup(CANCEL_KEYBOARD, resize_keyboard=True)
@@ -196,6 +192,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💬 AI ChatBot (Gemini)\n"
         "🎵 Musiqa metadata tahrirlash\n"
         "✂️ Audio kesish va qayta ishlash\n"
+        "🎛 <b>Remix Voices (Yangi!)</b>\n"
         "📊 Statistika va admin aloqasi\n\n"
         "💡 <b>Maslahat:</b> Tugmalarni bosing yoki /help buyrug'ini kiriting!"
     )
@@ -223,7 +220,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎵 <b>Audio funksiyalar:</b>\n"
         "/music - Musiqa tahrirlash\n"
         "/cut - Ovoz kesish\n"
-        "/convert - MP3 formatga\n\n"
+        "/convert - MP3 formatga\n"
+        "/remix - Ovoz birlashtirish (Remix)\n\n" # <--- YANGI
         
         "💬 <b>Boshqa:</b>\n"
         "/chat - AI bilan suhbat\n"
@@ -238,12 +236,8 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Asosiy menyuga qaytish"""
-    context.user_data.clear()
-    await update.message.reply_text(
-        "🏠 <b>Asosiy menyu</b>\n\nKerakli bo'limni tanlang:",
-        reply_markup=MAIN_MARKUP,
-        parse_mode='HTML'
-    )
+    await cancel(update, context) # Tozalab keyin menyuga qaytamiz
+    
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Statistika"""
@@ -251,97 +245,79 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"📊 <b>BOT STATISTIKASI</b>\n\n"
         f"👥 Foydalanuvchilar: <b>{total}</b> ta\n"
-        f"🤖 Bot versiyasi: <b>2.0</b>\n"
+        f"🤖 Bot versiyasi: <b>2.1 Remix</b>\n"
         f"⚡ Status: <b>Faol</b>",
         parse_mode='HTML'
     )
 
 # ===================== MODE COMMANDS =====================
 async def lat2kir_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lotin → Kiril mode"""
     context.user_data['mode'] = 'lat2kir'
     await update.message.reply_text(
-        "📝 <b>LOTIN → KIRIL</b>\n\n"
-        "✏️ Lotincha matn yuboring, men uni kirilga o'giraman!\n\n"
-        "📌 <i>Misol: Salom dunyo → Салом дунё</i>",
-        reply_markup=CANCEL_MARKUP,
-        parse_mode='HTML'
+        "📝 <b>LOTIN → KIRIL</b>\n\n✏️ Lotincha matn yuboring!",
+        reply_markup=CANCEL_MARKUP, parse_mode='HTML'
     )
 
 async def kir2lat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Kiril → Lotin mode"""
     context.user_data['mode'] = 'kir2lat'
     await update.message.reply_text(
-        "📝 <b>KIRIL → LOTIN</b>\n\n"
-        "✏️ Kirilcha matn yuboring, men uni lotinga o'giraman!\n\n"
-        "📌 <i>Misol: Салом дунё → Salom dunyo</i>",
-        reply_markup=CANCEL_MARKUP,
-        parse_mode='HTML'
+        "📝 <b>KIRIL → LOTIN</b>\n\n✏️ Kirilcha matn yuboring!",
+        reply_markup=CANCEL_MARKUP, parse_mode='HTML'
     )
 
 async def chat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """ChatBot mode"""
     context.user_data['mode'] = 'chat'
     await update.message.reply_text(
-        "💬 <b>AI CHATBOT</b>\n\n"
-        "🤖 Menga savol bering, men javob beraman!\n\n"
-        "📌 <i>Masalan: \"Python dasturlash haqida gapirib ber\"</i>",
-        reply_markup=CANCEL_MARKUP,
-        parse_mode='HTML'
+        "💬 <b>AI CHATBOT</b>\n\n🤖 Menga savol bering!",
+        reply_markup=CANCEL_MARKUP, parse_mode='HTML'
     )
 
 async def music_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Musiqa tahrirlash mode"""
     context.user_data['mode'] = 'music_edit'
     await update.message.reply_text(
-        "🎵 <b>MUSIQA TAHRIRLASH</b>\n\n"
-        "📁 MP3 faylini yuboring!\n\n"
-        "Men uning <b>Title</b> (Qo'shiq nomi) va <b>Author</b> (Ijrochi)ni o'zgartiraman.\n\n"
-        "💡 <i>Fayl yuklangandan keyin ko'rsatma beraman!</i>",
-        reply_markup=CANCEL_MARKUP,
-        parse_mode='HTML'
+        "🎵 <b>MUSIQA TAHRIRLASH</b>\n\n📁 MP3 faylini yuboring!",
+        reply_markup=CANCEL_MARKUP, parse_mode='HTML'
     )
 
 async def cut_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ovoz kesish mode"""
     context.user_data['mode'] = 'voice_cutter'
     await update.message.reply_text(
-        "✂️ <b>OVOZ KESUVCHI</b>\n\n"
-        "🎵 Audio fayl yuboring!\n\n"
-        "Keyin vaqtni kiriting:\n"
-        "📌 <b>Format:</b> 00:10-00:30\n\n"
-        "💡 <i>(10-soniyadan 30-soniyagacha kesadi)</i>",
-        reply_markup=CANCEL_MARKUP,
-        parse_mode='HTML'
+        "✂️ <b>OVOZ KESUVCHI</b>\n\n🎵 Audio fayl yuboring!",
+        reply_markup=CANCEL_MARKUP, parse_mode='HTML'
     )
 
 async def convert_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """MP3 ga aylantirish mode"""
     context.user_data['mode'] = 'voice_to_music'
     await update.message.reply_text(
-        "🎶 <b>MP3 GA AYLANTIRISH</b>\n\n"
-        "🎤 Audio yoki ovoz xabari yuboring!\n\n"
-        "Men uni <b>MP3 formatga</b> aylantirib beraman.\n\n"
-        "⚡ <i>Tez va sifatli!</i>",
-        reply_markup=CANCEL_MARKUP,
+        "🎶 <b>MP3 GA AYLANTIRISH</b>\n\n🎤 Audio yoki ovoz xabari yuboring!",
+        reply_markup=CANCEL_MARKUP, parse_mode='HTML'
+    )
+
+# --- YANGI REMIX MODE ---
+async def remix_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remix rejimi"""
+    context.user_data['mode'] = 'remix_wait_files'
+    context.user_data['remix_files'] = [] # Fayllarni yig'ish uchun ro'yxat
+    
+    await update.message.reply_text(
+        "🎛 <b>REMIX VOICES</b>\n\n"
+        "1️⃣ Menga bir nechta ovozli xabar yoki audio yuboring.\n"
+        "2️⃣ Yuborib bo'lgach <b>'▶️ Remix Start'</b> tugmasini bosing.\n"
+        "3️⃣ Men ularni bitta qilib birlashtirib beraman!\n\n"
+        "👇 <i>Ovozlarni yuborishni boshlang!</i>",
+        reply_markup=REMIX_MARKUP,
         parse_mode='HTML'
     )
 
 async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Adminga xabar mode"""
     context.user_data['mode'] = 'admin_msg'
     await update.message.reply_text(
-        "📩 <b>ADMINGA XABAR</b>\n\n"
-        "✉️ Xabar matnini yozing!\n\n"
-        "Admin ko'rib, javob beradi.\n\n"
-        "💡 <i>Iltimos, savol yoki taklifingizni aniq yozing.</i>",
-        reply_markup=CANCEL_MARKUP,
-        parse_mode='HTML'
+        "📩 <b>ADMINGA XABAR</b>\n\n✉️ Xabar matnini yozing!",
+        reply_markup=CANCEL_MARKUP, parse_mode='HTML'
     )
 
 # ===================== BUTTON HANDLER =====================
 async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Tugmalarni boshqarish"""
     text = update.message.text.strip()
     
     button_map = {
@@ -351,11 +327,17 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎵 Musiqa tahrirlash": music_cmd,
         "✂️ Ovoz kesuvchi": cut_cmd,
         "🎶 MP3 ga aylantirish": convert_cmd,
+        "🎛 Remix Voices": remix_cmd, # <--- XARITAGA QO'SHILDI
         "📊 Statistika": stats_cmd,
         "📩 Adminga xabar": admin_cmd,
         "❌ Bekor qilish": cancel,
     }
     
+    # Remix start tugmasini alohida tekshiramiz
+    if text == "▶️ Remix Start":
+        await process_remix_start(update, context)
+        return
+
     if text in button_map:
         await button_map[text](update, context)
     else:
@@ -366,465 +348,333 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ===================== TEXT HANDLER =====================
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Matn xabarlarni qayta ishlash"""
     mode = context.user_data.get('mode')
     text = update.message.text or ""
     uid = update.message.from_user.id
     
-    # Agar bekor qilish bo'lsa
     if text == "❌ Bekor qilish":
         await cancel(update, context)
         return
     
     if not mode:
-        await update.message.reply_text(
-            "❗ Iltimos, avval bo'limni tanlang!\n\n"
-            "Tugmalardan birini bosing yoki /help buyrug'ini kiriting.",
-            reply_markup=MAIN_MARKUP
-        )
+        await update.message.reply_text("❗ Bo'limni tanlang!", reply_markup=MAIN_MARKUP)
         return
     
-   # Lotin → Kiril
     if mode == 'lat2kir':
-        result = to_cyrillic(text)
-        await update.message.reply_text(
-            f"{result}",
-            parse_mode='HTML')
-
-# Kiril → Lotin
+        await update.message.reply_text(to_cyrillic(text), parse_mode='HTML')
     elif mode == 'kir2lat':
-        result = to_latin(text)
-        await update.message.reply_text(
-            f"{result}",
-            parse_mode='HTML')
-
-    
-    # ChatBot
+        await update.message.reply_text(to_latin(text), parse_mode='HTML')
     elif mode == 'chat':
-        msg = await update.message.reply_text("💬 Javob tayyorlanmoqda...")
-        reply = call_gemini(f"Foydalanuvchi so'rovi: {text}\n\nJavob bering:")
-        await msg.edit_text(
-            f"🤖 <b>JAVOB:</b>\n\n{reply}\n\n"
-            f"💬 <i>Yana savol bering yoki /menu bilan chiqing</i>",
-            parse_mode='HTML'
-        )
+        msg = await update.message.reply_text("💬 ...")
+        reply = call_gemini(f"{text}")
+        await msg.edit_text(reply, parse_mode='Markdown')
     
-    # Ovoz kesish vaqti
     elif mode == 'voice_wait_time':
         await process_voice_cut(update, context, text)
-    
-    # Musiqa title
+        
     elif mode == 'music_wait_title':
         context.user_data['music_title'] = text
         context.user_data['mode'] = 'music_wait_author'
-        await update.message.reply_text(
-            f"✅ Title qabul qilindi: <b>{text}</b>\n\n"
-            f"👤 Endi <b>Author</b> (Ijrochi) nomini kiriting:",
-            parse_mode='HTML'
-        )
-    
-    # Musiqa author
+        await update.message.reply_text(f"✅ Title: {text}\n👤 Authorni kiriting:")
+        
     elif mode == 'music_wait_author':
         context.user_data['music_author'] = text
         await process_music_edit(update, context)
-    
-    # Adminga xabar
+        
     elif mode == 'admin_msg':
-        markup = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✉️ Javob berish", callback_data=f"reply_{uid}")
-        ]])
-        await context.bot.send_message(
-            ADMIN_ID,
-            f"📨 <b>YANGI XABAR</b>\n\n"
-            f"👤 Foydalanuvchi ID: <code>{uid}</code>\n"
-            f"📝 Xabar:\n\n{text}",
-            reply_markup=markup,
-            parse_mode='HTML'
-        )
-        await update.message.reply_text(
-            "✅ <b>Xabaringiz yuborildi!</b>\n\n"
-            "📬 Admin ko'rib chiqadi va javob beradi.",
-            reply_markup=MAIN_MARKUP,
-            parse_mode='HTML'
-        )
+        # Admin logikasi (o'zgarishsiz)
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("✉️ Javob", callback_data=f"reply_{uid}")]])
+        await context.bot.send_message(ADMIN_ID, f"📨 ID: {uid}\nMsg: {text}", reply_markup=markup)
+        await update.message.reply_text("✅ Yuborildi!", reply_markup=MAIN_MARKUP)
         context.user_data.clear()
-    
-    # Admin javobi
+        
     elif mode == 'reply_user' and uid == ADMIN_ID:
         target = context.user_data.get('reply_to_user')
         if target:
-            await context.bot.send_message(
-                target,
-                f"💌 <b>ADMIN JAVOBI:</b>\n\n{text}",
-                parse_mode='HTML'
-            )
-            await update.message.reply_text(
-                "✅ Javob yuborildi!",
-                reply_markup=MAIN_MARKUP
-            )
+            await context.bot.send_message(target, f"💌 <b>JAVOB:</b>\n{text}", parse_mode='HTML')
+            await update.message.reply_text("✅ Javob ketdi!", reply_markup=MAIN_MARKUP)
             context.user_data.clear()
 
 # ===================== AUDIO HANDLERS =====================
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Audio fayllarni qayta ishlash"""
     mode = context.user_data.get('mode')
     audio = update.message.audio
     
-    if not audio:
-        await update.message.reply_text("❌ Audio fayl topilmadi!")
-        return
+    if not audio: return
     
-    if mode == 'music_edit':
-        msg = await update.message.reply_text("📥 Fayl yuklanmoqda...")
-        try:
-            file = await audio.get_file()
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-                path = f.name
-                await file.download_to_drive(path)
-            
-            context.user_data['music_file'] = path
-            context.user_data['mode'] = 'music_wait_title'
-            
-            await msg.edit_text(
-                "✅ <b>Musiqa yuklandi!</b> 🎵\n\n"
-                "📝 Endi <b>Title</b> (Qo'shiq nomi) kiriting:\n\n"
-                "💡 <i>Masalan: \"Muhabbat qo'shig'i\"</i>",
-                parse_mode='HTML'
-            )
-        except Exception as e:
-            await msg.edit_text(f"❌ Xatolik: {e}")
-            context.user_data.clear()
-    
-    elif mode in ('voice_cutter', 'voice_to_music'):
-        await handle_voice(update, context)
-    
-    else:
-        await update.message.reply_text(
-            "❗ Iltimos, avval tegishli bo'limni tanlang:\n"
-            "• /music - Musiqa tahrirlash\n"
-            "• /cut - Ovoz kesish\n"
-            "• /convert - MP3 ga aylantirish",
-            reply_markup=MAIN_MARKUP
-        )
-
-async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ovoz xabarlarini qayta ishlash"""
-    mode = context.user_data.get('mode')
-    voice = update.message.voice or update.message.audio
-    
-    if not voice:
-        await update.message.reply_text("❌ Audio topilmadi!")
-        return
-    
-    if mode not in ('voice_cutter', 'voice_to_music'):
-        await update.message.reply_text(
-            "❗ Iltimos, avval bo'limni tanlang:\n"
-            "• /cut - Ovoz kesish\n"
-            "• /convert - MP3 ga aylantirish",
-            reply_markup=MAIN_MARKUP
-        )
-        return
-    
-    msg = await update.message.reply_text("📥 Audio yuklanmoqda...")
-    
-    try:
-        file = await voice.get_file()
+    # --- REMIX LOGIKASI (AUDIO UCHUN) ---
+    if mode == 'remix_wait_files':
+        file = await audio.get_file()
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
             path = f.name
             await file.download_to_drive(path)
+            
+        # Ro'yxatga qo'shamiz
+        files_list = context.user_data.get('remix_files', [])
+        files_list.append(path)
+        context.user_data['remix_files'] = files_list
         
-        if mode == 'voice_cutter':
-            context.user_data['voice_file'] = path
-            context.user_data['mode'] = 'voice_wait_time'
-            
-            audio = AudioSegment.from_file(path)
-            duration = len(audio) // 1000
-            minutes = duration // 60
-            seconds = duration % 60
-            
-            await msg.edit_text(
-                f"✅ <b>Audio yuklandi!</b> ⏱\n\n"
-                f"📊 Uzunlik: <b>{minutes:02d}:{seconds:02d}</b>\n\n"
-                f"✂️ Kesish vaqtini kiriting:\n"
-                f"📌 <b>Format:</b> 00:10-00:30\n\n"
-                f"💡 <i>00:00 dan {minutes:02d}:{seconds:02d} gacha</i>",
-                parse_mode='HTML'
-            )
+        await update.message.reply_text(
+            f"✅ <b>Audio qo'shildi!</b>\n"
+            f"📥 Jami fayllar: <b>{len(files_list)}</b> ta\n\n"
+            f"Yana yuboring yoki <b>'▶️ Remix Start'</b> ni bosing.",
+            parse_mode='HTML',
+            reply_markup=REMIX_MARKUP
+        )
+        return
+    # -------------------------------------
+
+    if mode == 'music_edit':
+        msg = await update.message.reply_text("📥 Yuklanmoqda...")
+        file = await audio.get_file()
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+            path = f.name
+            await file.download_to_drive(path)
+        context.user_data['music_file'] = path
+        context.user_data['mode'] = 'music_wait_title'
+        await msg.edit_text("✅ Yuklandi! Title kiriting:")
         
-        elif mode == 'voice_to_music':
-            await msg.edit_text("🔄 Qayta ishlanmoqda...")
-            audio = AudioSegment.from_file(path)
+    elif mode in ('voice_cutter', 'voice_to_music'):
+        await handle_voice(update, context) # Audio bo'lsa ham voice funksiyasiga o'tkazamiz
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    mode = context.user_data.get('mode')
+    voice = update.message.voice or update.message.audio
+    
+    if not voice: return
+    
+    msg = await update.message.reply_text("📥 Yuklanmoqda...")
+    file = await voice.get_file()
+    
+    # --- REMIX LOGIKASI (VOICE UCHUN) ---
+    if mode == 'remix_wait_files':
+        # Ogg yoki Mp3 bo'lishi mumkin, pydub o'zi hal qiladi, lekin tempga olamiz
+        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as f:
+            path = f.name
+            await file.download_to_drive(path)
             
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f2:
-                out_path = f2.name
-                audio.export(out_path, format="mp3", bitrate="192k")
-            
-            await msg.delete()
-            with open(out_path, "rb") as audio_file:
-                await update.message.reply_audio(
-                    audio_file,
-                    caption="✅ <b>Tayyor!</b> 🎶\n\n<i>Yana audio yuboring yoki /menu bilan chiqing</i>",
-                    parse_mode='HTML'
-                )
-            
-            os.remove(out_path)
-            os.remove(path)
-            
-    except Exception as e:
-        await msg.edit_text(f"❌ Xatolik yuz berdi: {e}")
-        logger.exception("Audio processing error")
-        context.user_data.clear()
+        files_list = context.user_data.get('remix_files', [])
+        files_list.append(path)
+        context.user_data['remix_files'] = files_list
+        
+        await msg.edit_text(
+            f"✅ <b>Ovoz qo'shildi!</b>\n"
+            f"📥 Jami fayllar: <b>{len(files_list)}</b> ta\n\n"
+            f"Yana yuboring yoki <b>'▶️ Remix Start'</b> ni bosing.",
+            parse_mode='HTML'
+        )
+        return
+    # -------------------------------------
+
+    # Boshqa rejimlar uchun
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+        path = f.name
+        await file.download_to_drive(path)
+
+    if mode == 'voice_cutter':
+        context.user_data['voice_file'] = path
+        context.user_data['mode'] = 'voice_wait_time'
+        audio_seg = AudioSegment.from_file(path)
+        dur = len(audio_seg)//1000
+        await msg.edit_text(f"✅ Yuklandi! Uzunlik: {dur//60:02d}:{dur%60:02d}\nKesish vaqtini kiriting (00:00-00:10):")
+        
+    elif mode == 'voice_to_music':
+        await msg.edit_text("🔄 MP3 ga o'girilmoqda...")
+        audio_seg = AudioSegment.from_file(path)
+        
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f2:
+            out_path = f2.name
+            audio_seg.export(out_path, format="mp3", bitrate="192k")
+        
+        await msg.delete()
+        with open(out_path, "rb") as af:
+            await update.message.reply_audio(af, caption="✅ MP3 Tayyor!")
+        os.remove(out_path)
+        os.remove(path)
+        
+    else:
+        await msg.edit_text("❗ Avval bo'limni tanlang!", reply_markup=MAIN_MARKUP)
+        os.remove(path)
 
 # ===================== PROCESS FUNCTIONS =====================
-async def process_voice_cut(update: Update, context: ContextTypes.DEFAULT_TYPE, time_text: str):
-    """Ovozni kesish jarayoni"""
-    voice_file = context.user_data.get('voice_file')
-    
-    if not voice_file or not os.path.exists(voice_file):
-        await update.message.reply_text(
-            "❌ Audio fayl topilmadi!\n\n"
-            "Iltimos, qaytadan /cut buyrug'ini kiriting.",
-            reply_markup=MAIN_MARKUP
-        )
-        context.user_data.clear()
-        return
-    
-    # Vaqt formatini tekshirish
-    match = re.match(r"(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})", time_text.strip())
-    if not match:
-        await update.message.reply_text(
-            "❌ <b>Format xato!</b>\n\n"
-            "📌 To'g'ri format: <code>00:10-00:30</code>\n\n"
-            "💡 Yana urinib ko'ring:",
-            parse_mode='HTML'
-        )
-        return
-    
-    s_min, s_sec, e_min, e_sec = map(int, match.groups())
-    start_ms = (s_min * 60 + s_sec) * 1000
-    end_ms = (e_min * 60 + e_sec) * 1000
-    
-    if start_ms >= end_ms:
-        await update.message.reply_text(
-            "❌ <b>Xato!</b>\n\n"
-            "Boshlanish vaqti tugash vaqtidan kichik bo'lishi kerak!\n\n"
-            "💡 Qayta kiriting:",
-            parse_mode='HTML'
-        )
-        return
-    
-    msg = await update.message.reply_text("✂️ Kesilmoqda...")
-    
-    try:
-        audio = AudioSegment.from_file(voice_file)
-        
-        if end_ms > len(audio):
-            duration = len(audio) // 1000
-            minutes = duration // 60
-            seconds = duration % 60
-            await msg.edit_text(
-                f"❌ <b>Vaqt xato!</b>\n\n"
-                f"📊 Audio uzunligi: <b>{minutes:02d}:{seconds:02d}</b>\n\n"
-                f"💡 Vaqtni qayta kiriting:",
-                parse_mode='HTML'
-            )
-            return
-        
-        # Kesish
-        cut_audio = audio[start_ms:end_ms]
-        
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-            cut_path = f.name
-            cut_audio.export(cut_path, format="mp3", bitrate="192k")
-        
-        await msg.delete()
-        
-        duration = len(cut_audio) // 1000
-        with open(cut_path, "rb") as audio_file:
-            await update.message.reply_audio(
-                audio_file,
-                caption=f"✅ <b>Audio kesildi!</b> ✂️\n\n"
-                        f"⏱ Uzunlik: <b>{duration} soniya</b>\n\n"
-                        f"<i>Yana kesish uchun audio yuboring yoki /menu</i>",
-                parse_mode='HTML'
-            )
-        
-        os.remove(cut_path)
-        
-    except Exception as e:
-        await msg.edit_text(f"❌ Xatolik: {e}")
-        logger.exception("Voice cut error")
-    
-    finally:
-        if os.path.exists(voice_file):
-            os.remove(voice_file)
-        context.user_data.pop('voice_file', None)
 
-async def process_music_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Musiqa metadata tahrirlash"""
-    music_file = context.user_data.get('music_file')
-    title = context.user_data.get('music_title', 'Unknown')
-    author = context.user_data.get('music_author', 'Unknown')
+# --- YANGI REMIX PROCESS FUNCTION ---
+async def process_remix_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Yig'ilgan fayllarni birlashtirish"""
+    files = context.user_data.get('remix_files', [])
     
-    if not music_file or not os.path.exists(music_file):
-        await update.message.reply_text(
-            "❌ Musiqa fayli topilmadi!\n\n"
-            "Iltimos, qaytadan /music buyrug'ini kiriting.",
-            reply_markup=MAIN_MARKUP
-        )
-        context.user_data.clear()
+    if not files:
+        await update.message.reply_text("❌ Hali hech qanday ovoz yubormadingiz!", reply_markup=REMIX_MARKUP)
         return
-    
-    msg = await update.message.reply_text("🎵 Metadata o'zgartirilmoqda...")
-    
+
+    msg = await update.message.reply_text("🔄 <b>Remix tayyorlanmoqda...</b>\n\nIltimos kuting...", parse_mode='HTML')
+
     try:
-        # Audio faylni o'qish
-        audio = AudioSegment.from_file(music_file)
+        combined_audio = AudioSegment.empty()
         
-        # Yangi fayl yaratish
+        # Barcha fayllarni ochib, ketma-ket ulaymiz
+        for file_path in files:
+            try:
+                sound = AudioSegment.from_file(file_path)
+                combined_audio += sound # Concatenation (Ulash)
+            except Exception as e:
+                logger.error(f"Faylni o'qishda xato: {e}")
+        
+        # Natijani saqlash
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
             output_path = f.name
-            audio.export(output_path, format="mp3", bitrate="192k")
-        
-        # ID3 tags qo'shish
-        try:
-            audio_file = MP3(output_path, ID3=ID3)
-            try:
-                audio_file.add_tags()
-            except:
-                pass
-        except:
-            audio_file = MP3(output_path)
-        
-        # Metadata yozish
-        audio_file.tags.add(TIT2(encoding=3, text=title))
-        audio_file.tags.add(TPE1(encoding=3, text=author))
-        audio_file.save()
-        
+            combined_audio.export(output_path, format="mp3", bitrate="192k")
+            
         await msg.delete()
         
-        # Faylni yuborish
-        with open(output_path, "rb") as f:
+        # Foydalanuvchiga yuborish
+        with open(output_path, "rb") as audio_file:
             await update.message.reply_audio(
-                f,
-                title=title,
-                performer=author,
-                caption=f"✅ <b>Tayyor!</b> 🎵\n\n"
-                        f"📝 <b>Title:</b> {title}\n"
-                        f"👤 <b>Author:</b> {author}\n\n"
-                        f"<i>Yana tahrirlash uchun /music</i>",
-                parse_mode='HTML'
+                audio_file,
+                caption=f"🎛 <b>Remix Tayyor!</b>\n\n"
+                        f"🔗 Birlashtirilgan fayllar: {len(files)} ta\n"
+                        f"🤖 <i>Bot: @{context.bot.username}</i>",
+                parse_mode='HTML',
+                reply_markup=MAIN_MARKUP # Ish tugadi, asosiy menyuga qaytamiz
             )
-        
+            
+        # Tozalash
         os.remove(output_path)
+        for fp in files:
+            if os.path.exists(fp):
+                os.remove(fp)
         
-    except Exception as e:
-        await msg.edit_text(f"❌ Xatolik: {e}")
-        logger.exception("Music edit error")
-    
-    finally:
-        if os.path.exists(music_file):
-            os.remove(music_file)
         context.user_data.clear()
 
-# ===================== CALLBACK HANDLER =====================
+    except Exception as e:
+        await msg.edit_text(f"❌ Xatolik: {e}")
+        logger.exception("Remix error")
+# -------------------------------------
+
+async def process_voice_cut(update: Update, context: ContextTypes.DEFAULT_TYPE, time_text: str):
+    voice_file = context.user_data.get('voice_file')
+    if not voice_file: return
+    
+    match = re.match(r"(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})", time_text.strip())
+    if not match:
+        await update.message.reply_text("❌ Format xato! Masalan: 00:10-00:30")
+        return
+        
+    s_m, s_s, e_m, e_s = map(int, match.groups())
+    start_ms = (s_m * 60 + s_s) * 1000
+    end_ms = (e_m * 60 + e_s) * 1000
+    
+    if start_ms >= end_ms:
+        await update.message.reply_text("❌ Vaqt noto'g'ri!")
+        return
+
+    msg = await update.message.reply_text("✂️ Kesilmoqda...")
+    try:
+        audio = AudioSegment.from_file(voice_file)
+        cut = audio[start_ms:end_ms]
+        
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+            c_path = f.name
+            cut.export(c_path, format="mp3")
+            
+        await msg.delete()
+        with open(c_path, "rb") as af:
+            await update.message.reply_audio(af, caption="✅ Kesildi!")
+        os.remove(c_path)
+    except Exception as e:
+        await msg.edit_text(f"Xato: {e}")
+    finally:
+        os.remove(voice_file)
+        context.user_data.clear()
+
+async def process_music_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m_file = context.user_data.get('music_file')
+    title = context.user_data.get('music_title')
+    author = context.user_data.get('music_author')
+    
+    msg = await update.message.reply_text("🎵 O'zgartirilmoqda...")
+    try:
+        audio = AudioSegment.from_file(m_file)
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+            out = f.name
+            audio.export(out, format="mp3")
+            
+        mp3 = MP3(out, ID3=ID3)
+        try: mp3.add_tags()
+        except: pass
+        mp3.tags.add(TIT2(encoding=3, text=title))
+        mp3.tags.add(TPE1(encoding=3, text=author))
+        mp3.save()
+        
+        await msg.delete()
+        with open(out, "rb") as af:
+            await update.message.reply_audio(af, caption="✅ Metadata o'zgardi!")
+        os.remove(out)
+    except Exception as e:
+        await msg.edit_text(f"Xato: {e}")
+    finally:
+        os.remove(m_file)
+        context.user_data.clear()
+
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Inline tugmalar callback"""
     query = update.callback_query
     await query.answer()
-    
     if query.data.startswith("reply_") and query.from_user.id == ADMIN_ID:
-        user_id = int(query.data.split("_")[1])
-        context.user_data['reply_to_user'] = user_id
+        uid = int(query.data.split("_")[1])
+        context.user_data['reply_to_user'] = uid
         context.user_data['mode'] = 'reply_user'
-        
-        await query.message.reply_text(
-            f"✏️ <b>Foydalanuvchi {user_id} ga javob:</b>\n\n"
-            f"Javob matnini yozing:",
-            parse_mode='HTML'
-        )
+        await query.message.reply_text(f"✏️ User {uid} ga javob yozing:")
 
 # ===================== CANCEL =====================
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Amalni bekor qilish"""
-    # Fayllarni tozalash
-    voice_file = context.user_data.get('voice_file')
-    music_file = context.user_data.get('music_file')
-    
-    if voice_file and os.path.exists(voice_file):
-        os.remove(voice_file)
-    if music_file and os.path.exists(music_file):
-        os.remove(music_file)
-    
+    """Tozalash va bekor qilish"""
+    # Eski fayllarni o'chirish
+    for key in ['voice_file', 'music_file']:
+        f = context.user_data.get(key)
+        if f and os.path.exists(f): os.remove(f)
+        
+    # Remix fayllarini tozalash
+    remix_files = context.user_data.get('remix_files', [])
+    for f in remix_files:
+        if f and os.path.exists(f): os.remove(f)
+
     context.user_data.clear()
-    
     await update.message.reply_text(
-        "❌ <b>Amal bekor qilindi!</b>\n\n"
-        "🏠 Bosh menyuga qaytdingiz.",
-        reply_markup=MAIN_MARKUP,
+        "🏠 <b>Bosh menyu</b>", 
+        reply_markup=MAIN_MARKUP, 
         parse_mode='HTML'
     )
 
-# ===================== ERROR HANDLER =====================
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    """Global xatolarni tutish"""
-    logger.error(f"Update {update} caused error {context.error}")
-    
-    if isinstance(update, Update) and update.effective_message:
-        await update.effective_message.reply_text(
-            "❌ <b>Xatolik yuz berdi!</b>\n\n"
-            "Iltimos, qaytadan urinib ko'ring yoki /start buyrug'ini kiriting.",
-            parse_mode='HTML',
-            reply_markup=MAIN_MARKUP
-        )
+    logger.error(f"Error: {context.error}")
 
 # ===================== MAIN =====================
 def main():
-    """Botni ishga tushirish"""
     logger.info("🤖 Bot ishga tushmoqda...")
-    
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
-    # ===== BUYRUQLAR =====
-    # Asosiy
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(CommandHandler("menu", menu_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
     
-    # Funksional
-    app.add_handler(CommandHandler("lat2kir", lat2kir_cmd))
-    app.add_handler(CommandHandler("kir2lat", kir2lat_cmd))
-    app.add_handler(CommandHandler("chat", chat_cmd))
-    app.add_handler(CommandHandler("music", music_cmd))
-    app.add_handler(CommandHandler("cut", cut_cmd))
-    app.add_handler(CommandHandler("convert", convert_cmd))
-    app.add_handler(CommandHandler("admin", admin_cmd))
+    # Mode komandalari
+    for cmd in ["lat2kir","kir2lat","chat","music","cut","convert","admin"]:
+        app.add_handler(CommandHandler(cmd, globals()[f"{cmd}_cmd"]))
+    app.add_handler(CommandHandler("remix", remix_cmd)) # Remix buyrug'i
     
-    # ===== TUGMALAR =====
-    button_filter = filters.TEXT & filters.Regex(
-        r"^(📝 Lotin → Kiril|📝 Kiril → Lotin|💬 ChatBot|🎵 Musiqa tahrirlash|"
-        r"✂️ Ovoz kesuvchi|🎶 MP3 ga aylantirish|📊 Statistika|📩 Adminga xabar|❌ Bekor qilish)$"
-    )
-    app.add_handler(MessageHandler(button_filter, handle_buttons))
+    # Tugmalar
+    app.add_handler(MessageHandler(filters.Regex(r"^(📝|💬|🎵|✂️|🎶|📊|📩|🎛|❌|▶️)"), handle_buttons))
     
-    # ===== MEDIA =====
+    # Media
     app.add_handler(MessageHandler(filters.AUDIO, handle_audio))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
-    
-    # ===== CALLBACK =====
     app.add_handler(CallbackQueryHandler(button_callback))
-    
-    # ===== MATN =====
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
-    
-    # ===== ERROR HANDLER =====
     app.add_error_handler(error_handler)
     
-    logger.info("✅ Bot muvaffaqiyatli ishga tushdi!")
-    logger.info("📱 Telegram botingiz tayyor!")
-    
+    logger.info("✅ Bot tayyor!")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
