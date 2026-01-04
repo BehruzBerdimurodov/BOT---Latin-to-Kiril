@@ -18,7 +18,7 @@ import google.generativeai as genai
 
 # --- Configuration ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN") or "727974350:AAFM3LfQ18Bur6oDacjRNnnoLYRKkUjEoXM"
-GENAI_API_KEY = os.environ.get("GENAI_API_KEY") or "AIzaSyAy5qfTSrOLS5DwcrLWnJJDvX_UJCLFGbU"
+GENAI_API_KEY = os.environ.get("GENAI_API_KEY") or "AIzaSyBbnOkS0QwEt5CDxHdHhlMTdsO4vgwPdMI"
 ADMIN_ID = int(os.environ.get("ADMIN_ID") or 468374402)
 
 # --- Configure Gemini ---
