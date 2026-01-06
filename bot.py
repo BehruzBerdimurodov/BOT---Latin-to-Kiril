@@ -267,6 +267,13 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ===================== MODE COMMANDS =====================
 async def lat2kir_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Agar foydalanuvchi "/lat2kir Salom" deb yozsa, darhol javob beramiz
+    if context.args:
+        text = " ".join(context.args)
+        await update.message.reply_text(to_cyrillic(text), parse_mode="HTML")
+        return
+
+    # Aks holda rejimni yoqamiz
     context.user_data["mode"] = "lat2kir"
     await update.message.reply_text(
         "📝 <b>LOTIN → KIRIL</b>\n\n✏️ Lotincha matn yuboring!",
@@ -274,8 +281,13 @@ async def lat2kir_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML",
     )
 
-
 async def kir2lat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Agar foydalanuvchi "/kir2lat Салом" deb yozsa
+    if context.args:
+        text = " ".join(context.args)
+        await update.message.reply_text(to_latin(text), parse_mode="HTML")
+        return
+
     context.user_data["mode"] = "kir2lat"
     await update.message.reply_text(
         "📝 <b>KIRIL → LOTIN</b>\n\n✏️ Kirilcha matn yuboring!",
@@ -714,11 +726,17 @@ def main():
     app.add_handler(CommandHandler("remix", remix_cmd))
 
     # Tugmalar
-    app.add_handler(
-        MessageHandler(
-            filters.Regex(r"^(📝|💬|🎵|✂️|🎶|📊|📩|🎛|❌|▶️)"), handle_buttons
-        )
-    )
+    # 1. Avval tugmalar matnini ro'yxat qilib olamiz (Bot adashmasligi uchun)
+    BUTTON_FILTERS = [
+        "📝 Lotin → Kiril", "📝 Kiril → Lotin",
+        "💬 ChatBot", "🎵 Musiqa tahrirlash",
+        "✂️ Ovoz kesuvchi", "🎶 MP3 ga aylantirish",
+        "🎛 Remix Voices", "📊 Statistika",
+        "📩 Adminga xabar", "❌ Bekor qilish", "▶️ Remix Start"
+    ]
+
+    # 2. Regex o'rniga filters.Text ishlatamiz (Aniq moslik uchun)
+    app.add_handler(MessageHandler(filters.Text(BUTTON_FILTERS), handle_buttons))
 
     # Media
     app.add_handler(MessageHandler(filters.AUDIO, handle_audio))
