@@ -22,17 +22,6 @@ from telegram.ext import (
     filters,
 )
 
-# ===================== FFMPEG SOZLASH =====================
-try:
-    import imageio_ffmpeg
-    _ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-    AudioSegment.converter = _ffmpeg_exe
-    AudioSegment.ffmpeg = _ffmpeg_exe
-    logging.getLogger(__name__).info(f"✅ ffmpeg topildi: {_ffmpeg_exe}")
-except Exception as _e:
-    logging.getLogger(__name__).warning(f"imageio_ffmpeg ishlamadi: {_e}, tizim ffmpeg ishlatiladi")
-# ==========================================================
-
 # --- Configuration ---
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN") or "727974350:AAFM3LfQ18Bur6oDacjRNnnoLYRKkUjEoXM"
 GENAI_API_KEY = os.environ.get("GENAI_API_KEY") or "AIzaSyBbnOkS0QwEt5CDxHdHhlMTdsO4vgwPdMI"
@@ -98,6 +87,7 @@ def to_cyrillic(text):
     for lat, cyr in pairs:
         text = text.replace(lat, cyr)
 
+    # So'z boshida E → Э
     text = re.sub(r"\bE", "Э", text)
     text = re.sub(r"\be", "э", text)
 
@@ -114,22 +104,33 @@ def to_cyrillic(text):
     return "".join(mapping.get(ch, ch) for ch in text)
 
 
-# ===================== KIRIL → LOTIN =====================
+# ===================== KIRIL → LOTIN (TUZATILGAN) =====================
 def to_latin(text):
-    """Kirildan lotinga transliteratsiya"""
+    """Kirildan lotinga transliteratsiya - barcha xatolar tuzatildi"""
 
     def fix_E(text):
+        # 1. "Э" harfi har doim "E" bo'ladi (zamonaviy o'zbek lotin alifbosi)
         text = text.replace("Э", "E").replace("э", "e")
+
+        # 2. So'z boshidagi "Е" -> "Ye" (Masalan: Еr -> Yer, Еtti -> Yetti)
         text = re.sub(r"\bЕ", "Ye", text)
         text = re.sub(r"\bе", "ye", text)
+
+        # 3. Unlidan keyin kelgan "Е" -> "Ye" (Masalan: Muayyan, ssenariye)
+        # DIQQAT: Bu yerda Q, G', H kabi undoshlar bo'lmasligi kerak!
         vowels = "АаЕеЁёИиОоУуЎўЮюЯя"
         text = re.sub(rf"([{vowels}])Е", r"\1Ye", text)
         text = re.sub(rf"([{vowels}])е", r"\1ye", text)
+
+        # 4. Qolgan holatlarda (undoshlardan keyin) "Е" -> "E"
+        # (Masalan: Hеch -> Hech, Darvoqе -> Darvoqe, Voqеa -> Voqea)
         text = text.replace("Е", "E").replace("е", "e")
+
         return text
 
     text = fix_E(text)
 
+    # Murakkab kombinatsiyalar
     mapping = [
         ("қў", "qo'"), ("Қў", "Qo'"),
         ("ё", "yo"), ("Ё", "Yo"),
@@ -195,9 +196,12 @@ CANCEL_MARKUP = ReplyKeyboardMarkup(CANCEL_KEYBOARD, resize_keyboard=True)
 
 # ===================== START & HELP =====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bot ishga tushganda"""
     user = update.effective_user
     context.bot_data.setdefault("users", set())
     context.bot_data["users"].add(user.id)
+
+    # Mode reset
     context.user_data.clear()
 
     welcome = (
@@ -217,6 +221,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Yordam va buyruqlar"""
     help_text = (
         "📚 <b>YORDAM VA BUYRUQLAR</b>\n\n"
         "🎯 <b>Asosiy buyruqlar:</b>\n"
@@ -239,14 +244,17 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💡 <b>Maslahat:</b>\n"
         "Har bir funksiyani ishlatish uchun tegishli tugmani bosing yoki buyruqni yozing!"
     )
+
     await update.message.reply_text(help_text, parse_mode="HTML")
 
 
 async def menu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Asosiy menyuga qaytish"""
     await cancel(update, context)
 
 
 async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Statistika"""
     total = len(context.bot_data.get("users", set()))
     await update.message.reply_text(
         f"📊 <b>BOT STATISTIKASI</b>\n\n"
@@ -259,24 +267,32 @@ async def stats_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ===================== MODE COMMANDS =====================
 async def lat2kir_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Agar foydalanuvchi "/lat2kir Salom" deb yozsa, darhol javob beramiz
     if context.args:
-        await update.message.reply_text(to_cyrillic(" ".join(context.args)))
+        text = " ".join(context.args)
+        await update.message.reply_text(to_cyrillic(text), parse_mode="HTML")
         return
+
+    # Aks holda rejimni yoqamiz
     context.user_data["mode"] = "lat2kir"
     await update.message.reply_text(
         "📝 <b>LOTIN → KIRIL</b>\n\n✏️ Lotincha matn yuboring!",
-        reply_markup=CANCEL_MARKUP, parse_mode="HTML",
+        reply_markup=CANCEL_MARKUP,
+        parse_mode="HTML",
     )
 
-
 async def kir2lat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Agar foydalanuvchi "/kir2lat Салом" deb yozsa
     if context.args:
-        await update.message.reply_text(to_latin(" ".join(context.args)))
+        text = " ".join(context.args)
+        await update.message.reply_text(to_latin(text), parse_mode="HTML")
         return
+
     context.user_data["mode"] = "kir2lat"
     await update.message.reply_text(
         "📝 <b>KIRIL → LOTIN</b>\n\n✏️ Kirilcha matn yuboring!",
-        reply_markup=CANCEL_MARKUP, parse_mode="HTML",
+        reply_markup=CANCEL_MARKUP,
+        parse_mode="HTML",
     )
 
 
@@ -284,7 +300,8 @@ async def chat_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["mode"] = "chat"
     await update.message.reply_text(
         "💬 <b>AI CHATBOT</b>\n\n🤖 Menga savol bering!",
-        reply_markup=CANCEL_MARKUP, parse_mode="HTML",
+        reply_markup=CANCEL_MARKUP,
+        parse_mode="HTML",
     )
 
 
@@ -292,7 +309,8 @@ async def music_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["mode"] = "music_edit"
     await update.message.reply_text(
         "🎵 <b>MUSIQA TAHRIRLASH</b>\n\n📁 MP3 faylini yuboring!",
-        reply_markup=CANCEL_MARKUP, parse_mode="HTML",
+        reply_markup=CANCEL_MARKUP,
+        parse_mode="HTML",
     )
 
 
@@ -300,7 +318,8 @@ async def cut_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["mode"] = "voice_cutter"
     await update.message.reply_text(
         "✂️ <b>OVOZ KESUVCHI</b>\n\n🎵 Audio fayl yuboring!",
-        reply_markup=CANCEL_MARKUP, parse_mode="HTML",
+        reply_markup=CANCEL_MARKUP,
+        parse_mode="HTML",
     )
 
 
@@ -308,13 +327,15 @@ async def convert_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["mode"] = "voice_to_music"
     await update.message.reply_text(
         "🎶 <b>MP3 GA AYLANTIRISH</b>\n\n🎤 Audio yoki ovoz xabari yuboring!",
-        reply_markup=CANCEL_MARKUP, parse_mode="HTML",
+        reply_markup=CANCEL_MARKUP,
+        parse_mode="HTML",
     )
 
 
 async def remix_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remix rejimi"""
     context.user_data["mode"] = "remix_wait_files"
-    context.user_data["remix_files"] = []
+    context.user_data["remix_files"] = []  # Fayllarni yig'ish uchun ro'yxat
 
     await update.message.reply_text(
         "🎛 <b>REMIX VOICES</b>\n\n"
@@ -322,7 +343,8 @@ async def remix_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "2️⃣ Yuborib bo'lgach <b>'▶️ Remix Start'</b> tugmasini bosing.\n"
         "3️⃣ Men ularni bitta qilib birlashtirib beraman!\n\n"
         "👇 <i>Ovozlarni yuborishni boshlang!</i>",
-        reply_markup=REMIX_MARKUP, parse_mode="HTML",
+        reply_markup=REMIX_MARKUP,
+        parse_mode="HTML",
     )
 
 
@@ -330,7 +352,8 @@ async def admin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["mode"] = "admin_msg"
     await update.message.reply_text(
         "📩 <b>ADMINGA XABAR</b>\n\n✉️ Xabar matnini yozing!",
-        reply_markup=CANCEL_MARKUP, parse_mode="HTML",
+        reply_markup=CANCEL_MARKUP,
+        parse_mode="HTML",
     )
 
 
@@ -378,22 +401,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if mode == "lat2kir":
-        await update.message.reply_text(to_cyrillic(text))
+        await update.message.reply_text(to_cyrillic(text), parse_mode="HTML")
     elif mode == "kir2lat":
-        await update.message.reply_text(to_latin(text))
+        await update.message.reply_text(to_latin(text), parse_mode="HTML")
     elif mode == "chat":
         msg = await update.message.reply_text("💬 ...")
-        reply = call_gemini(text)
+        reply = call_gemini(f"{text}")
         await msg.edit_text(reply, parse_mode="Markdown")
+
     elif mode == "voice_wait_time":
         await process_voice_cut(update, context, text)
+
     elif mode == "music_wait_title":
         context.user_data["music_title"] = text
         context.user_data["mode"] = "music_wait_author"
         await update.message.reply_text(f"✅ Title: {text}\n👤 Authorni kiriting:")
+
     elif mode == "music_wait_author":
         context.user_data["music_author"] = text
         await process_music_edit(update, context)
+
     elif mode == "admin_msg":
         markup = InlineKeyboardMarkup(
             [[InlineKeyboardButton("✉️ Javob", callback_data=f"reply_{uid}")]]
@@ -403,10 +430,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text("✅ Yuborildi!", reply_markup=MAIN_MARKUP)
         context.user_data.clear()
+
     elif mode == "reply_user" and uid == ADMIN_ID:
         target = context.user_data.get("reply_to_user")
         if target:
-            await context.bot.send_message(target, f"💌 <b>JAVOB:</b>\n{text}", parse_mode="HTML")
+            await context.bot.send_message(
+                target, f"💌 <b>JAVOB:</b>\n{text}", parse_mode="HTML"
+            )
             await update.message.reply_text("✅ Javob ketdi!", reply_markup=MAIN_MARKUP)
             context.user_data.clear()
 
@@ -419,12 +449,14 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not audio:
         return
 
+    # --- REMIX LOGIKASI (AUDIO UCHUN) ---
     if mode == "remix_wait_files":
         file = await audio.get_file()
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
             path = f.name
             await file.download_to_drive(path)
 
+        # Ro'yxatga qo'shamiz
         files_list = context.user_data.get("remix_files", [])
         files_list.append(path)
         context.user_data["remix_files"] = files_list
@@ -433,9 +465,11 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ <b>Audio qo'shildi!</b>\n"
             f"📥 Jami fayllar: <b>{len(files_list)}</b> ta\n\n"
             f"Yana yuboring yoki <b>'▶️ Remix Start'</b> ni bosing.",
-            parse_mode="HTML", reply_markup=REMIX_MARKUP,
+            parse_mode="HTML",
+            reply_markup=REMIX_MARKUP,
         )
         return
+    # -------------------------------------
 
     if mode == "music_edit":
         msg = await update.message.reply_text("📥 Yuklanmoqda...")
@@ -448,7 +482,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text("✅ Yuklandi! Title kiriting:")
 
     elif mode in ("voice_cutter", "voice_to_music"):
-        await handle_voice(update, context)
+        await handle_voice(update, context)  # Audio bo'lsa ham voice funksiyasiga o'tkazamiz
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -461,6 +495,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("📥 Yuklanmoqda...")
     file = await voice.get_file()
 
+    # --- REMIX LOGIKASI (VOICE UCHUN) ---
     if mode == "remix_wait_files":
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as f:
             path = f.name
@@ -477,6 +512,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
         )
         return
+    # -------------------------------------
 
     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
         path = f.name
@@ -488,8 +524,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         audio_seg = AudioSegment.from_file(path)
         dur = len(audio_seg) // 1000
         await msg.edit_text(
-            f"✅ Yuklandi! Uzunlik: {dur // 60:02d}:{dur % 60:02d}\n"
-            f"Kesish vaqtini kiriting (masalan: 00:10-00:30):"
+            f"✅ Yuklandi! Uzunlik: {dur // 60:02d}:{dur % 60:02d}\nKesish vaqtini kiriting (00:00-00:10):"
         )
 
     elif mode == "voice_to_music":
@@ -512,7 +547,11 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ===================== PROCESS FUNCTIONS =====================
+
+
+# --- YANGI REMIX PROCESS FUNCTION ---
 async def process_remix_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Yig'ilgan fayllarni birlashtirish"""
     files = context.user_data.get("remix_files", [])
 
     if not files:
@@ -544,11 +583,9 @@ async def process_remix_start(update: Update, context: ContextTypes.DEFAULT_TYPE
         with open(output_path, "rb") as audio_file:
             await update.message.reply_audio(
                 audio_file,
-                caption=(
-                    f"🎛 <b>Remix Tayyor!</b>\n\n"
-                    f"🔗 Birlashtirilgan fayllar: {len(files)} ta\n"
-                    f"🤖 <i>Bot: @{context.bot.username}</i>"
-                ),
+                caption=f"🎛 <b>Remix Tayyor!</b>\n\n"
+                f"🔗 Birlashtirilgan fayllar: {len(files)} ta\n"
+                f"🤖 <i>Bot: @{context.bot.username}</i>",
                 parse_mode="HTML",
                 reply_markup=MAIN_MARKUP,
             )
@@ -565,7 +602,9 @@ async def process_remix_start(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.exception("Remix error")
 
 
-async def process_voice_cut(update: Update, context: ContextTypes.DEFAULT_TYPE, time_text: str):
+async def process_voice_cut(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, time_text: str
+):
     voice_file = context.user_data.get("voice_file")
     if not voice_file:
         return
@@ -599,8 +638,7 @@ async def process_voice_cut(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     except Exception as e:
         await msg.edit_text(f"Xato: {e}")
     finally:
-        if os.path.exists(voice_file):
-            os.remove(voice_file)
+        os.remove(voice_file)
         context.user_data.clear()
 
 
@@ -619,7 +657,7 @@ async def process_music_edit(update: Update, context: ContextTypes.DEFAULT_TYPE)
         mp3 = MP3(out, ID3=ID3)
         try:
             mp3.add_tags()
-        except Exception:
+        except:
             pass
         mp3.tags.add(TIT2(encoding=3, text=title))
         mp3.tags.add(TPE1(encoding=3, text=author))
@@ -632,8 +670,7 @@ async def process_music_edit(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         await msg.edit_text(f"Xato: {e}")
     finally:
-        if os.path.exists(m_file):
-            os.remove(m_file)
+        os.remove(m_file)
         context.user_data.clear()
 
 
@@ -649,12 +686,16 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ===================== CANCEL =====================
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tozalash va bekor qilish"""
+    # Eski fayllarni o'chirish
     for key in ["voice_file", "music_file"]:
         f = context.user_data.get(key)
         if f and os.path.exists(f):
             os.remove(f)
 
-    for f in context.user_data.get("remix_files", []):
+    # Remix fayllarini tozalash
+    remix_files = context.user_data.get("remix_files", [])
+    for f in remix_files:
         if f and os.path.exists(f):
             os.remove(f)
 
@@ -679,10 +720,13 @@ def main():
     app.add_handler(CommandHandler("menu", menu_cmd))
     app.add_handler(CommandHandler("stats", stats_cmd))
 
+    # Mode komandalari
     for cmd in ["lat2kir", "kir2lat", "chat", "music", "cut", "convert", "admin"]:
         app.add_handler(CommandHandler(cmd, globals()[f"{cmd}_cmd"]))
     app.add_handler(CommandHandler("remix", remix_cmd))
 
+    # Tugmalar
+    # 1. Avval tugmalar matnini ro'yxat qilib olamiz (Bot adashmasligi uchun)
     BUTTON_FILTERS = [
         "📝 Lotin → Kiril", "📝 Kiril → Lotin",
         "💬 ChatBot", "🎵 Musiqa tahrirlash",
@@ -691,7 +735,10 @@ def main():
         "📩 Adminga xabar", "❌ Bekor qilish", "▶️ Remix Start"
     ]
 
+    # 2. Regex o'rniga filters.Text ishlatamiz (Aniq moslik uchun)
     app.add_handler(MessageHandler(filters.Text(BUTTON_FILTERS), handle_buttons))
+
+    # Media
     app.add_handler(MessageHandler(filters.AUDIO, handle_audio))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(CallbackQueryHandler(button_callback))
@@ -704,3 +751,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+Mana
